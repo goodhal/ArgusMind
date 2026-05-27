@@ -1,0 +1,6 @@
+# 持久化数据目录（绑定挂载，勿提交到 Git）
+postgres/
+neo4j/
+work/
+repos/*
+!repos/.gitkeep

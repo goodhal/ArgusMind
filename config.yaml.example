@@ -1,0 +1,19 @@
+# ArgusMind 配置样例
+# 注意：仅 neo4j / postgres 会从环境变量或此 YAML 读取；
+# LLM / OpenCode 等其它配置必须写入 PostgreSQL 的 configs 表（由 init_db 种子化）
+
+neo4j:
+  uri: "bolt://127.0.0.1:7687"
+  user: "neo4j"
+  password: "YourNeo4jPassword123!"
+
+postgres:
+  host: "127.0.0.1"
+  port: 5432
+  db: "argusmind"
+  user: "argusmind"
+  password: "YourPgPassword123!"
+
+log_level: "INFO"
+# log_file: "./logs/argusmind.log"
+# work_dir: "./work"

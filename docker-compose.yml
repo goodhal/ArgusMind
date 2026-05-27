@@ -1,0 +1,104 @@
+# ArgusMind 一键部署：PostgreSQL + Neo4j + API
+# 使用方式：./install.sh  或  .\install.ps1
+
+name: argusmind
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: argusmind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-argusmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argusmind_pg_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-argusmind}
+      TZ: Asia/Shanghai
+    volumes:
+      # 固定宿主机目录；仅容器网络内访问，不映射端口到宿主机
+      - ${DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks:
+      - argusmind-net
+
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: argusmind-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-argusmind_neo4j_change_me}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_PLUGINS: '[]'
+      TZ: Asia/Shanghai
+    volumes:
+      # 仅容器网络内访问（bolt://neo4j:7687），不映射到宿主机
+      - ${DATA_DIR:-./data}/neo4j:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q --spider http://localhost:7474 || exit 1",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    networks:
+      - argusmind-net
+
+  argusmind:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: argusmind:latest
+    container_name: argusmind-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-argusmind}
+      POSTGRES_USER: ${POSTGRES_USER:-argusmind}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argusmind_pg_change_me}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-argusmind_neo4j_change_me}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: Asia/Shanghai
+    ports:
+      - "${ARGUSMIND_PORT:-6066}:6066"
+    volumes:
+      # 将被测代码库挂载到此目录，在 API 中注册项目时使用容器内路径，例如 /data/repos/my-project
+      - ${DATA_DIR:-./data}/repos:/data/repos
+      - ${DATA_DIR:-./data}/work:/app/work
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://localhost:6066/api/health >/dev/null || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+    networks:
+      - argusmind-net
+
+networks:
+  argusmind-net:
+    driver: bridge

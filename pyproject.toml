@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argusmind"
+version = "0.1.0"
+description = "AI 自主代码审计系统（Neo4j + PostgreSQL）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "ArgusMind Team"}
+]
+
+dependencies = [
+    "neo4j>=5.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.12.0",
+    # PyPI 包名为 opencode-ai，import 名为 opencode_ai；稳定版前多为 a 后缀，勿写成不存在的 opencode
+    "opencode-ai>=0.1.0a30",
+    "litellm>=1.0.0",  # 统一调用 100+ LLM（OpenAI/Anthropic/Azure/Gemini/VLLM 等）
+    "json-repair>=0.7.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+gitnexus = [
+    "mcp>=1.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+
