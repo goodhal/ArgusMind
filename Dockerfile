@@ -1,3 +1,7 @@
+# 官方未提供 Debian/apt 包；Debian 上需通过 cargo 编译安装 tokei
+FROM rust:1-bookworm AS tokei-builder
+RUN cargo install tokei --locked
+
 # ArgusMind 单容器：前端（Nginx）+ 后端（FastAPI）
 FROM python:3.11-slim-bookworm
 
@@ -37,15 +41,8 @@ RUN pip install --upgrade pip \
 RUN npm config set registry https://registry.npmmirror.com \
     && npm i -g opencode-ai gitnexus
 
-# 预装 tokei：优先使用 Debian 包管理器安装，失败不阻断镜像构建
-RUN set -e; \
-    apt-get update; \
-    if apt-get install -y --no-install-recommends tokei; then \
-      echo "[Dockerfile] Installed tokei via apt."; \
-    else \
-      echo "[Dockerfile] apt install tokei failed, continue without tokei." >&2; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*
+# 预装 tokei（来自 tokei-builder 阶段；Debian 无 apt 包）
+COPY --from=tokei-builder /usr/local/cargo/bin/tokei /usr/local/bin/tokei
 
 RUN mkdir -p /app/work /app/data/repos
 
