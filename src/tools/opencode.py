@@ -21,7 +21,8 @@ from src.tools.base import (
     ERROR_CODE_EXTERNAL,
     ToolResult,
 )
-from src.utils.base import get_platform, get_free_port
+from src.tools.bootstrap.opencode_runtime import resolve_opencode_executable
+from src.utils.base import get_free_port
 
 logger = logging.getLogger(__name__)
 
@@ -743,8 +744,15 @@ class OpenCodeTool(BaseTool):
         if self._process is not None:
             return  # 已启动，避免重复
 
+        opencode_exe = resolve_opencode_executable()
+        if not opencode_exe:
+            logger.error(
+                "OpenCode 启动失败：未在 PATH 中找到 opencode 命令（可尝试 npm i -g opencode-ai）"
+            )
+            return
+
         cmd = [
-            "opencode.cmd",
+            opencode_exe,
             "serve",
             "--port",
             str(self.port),

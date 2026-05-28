@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 _CN_NPM_REGISTRY = "https://registry.npmmirror.com"
@@ -25,25 +25,30 @@ def _run(
     )
 
 
-def _tool_version_ok(exe: str, version_flag: str = "--version") -> Tuple[bool, str]:
-    path = shutil.which(exe)
-    if not path:
-        return False, f"未在 PATH 中找到 `{exe}`"
-    try:
-        r = _run([path, version_flag], timeout=20.0)
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "").strip() or f"exit {r.returncode}"
-            return False, f"`{exe}` 执行失败: {err}"
-        return True, (r.stdout or r.stderr or "").strip()
-    except FileNotFoundError:
-        return False, f"无法执行 `{exe}`"
-    except subprocess.TimeoutExpired:
-        return False, f"`{exe} {version_flag}` 超时"
+def resolve_opencode_executable() -> Optional[str]:
+    """返回 PATH 中可执行的 opencode 绝对路径（Linux/macOS 为 opencode，Windows 可能为 opencode.cmd）。"""
+    for name in ("opencode", "opencode.cmd"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
 
 
 def check_opencode_command() -> Tuple[bool, str]:
     """检查 opencode 命令是否存在且可执行。"""
-    return _tool_version_ok("opencode")
+    path = resolve_opencode_executable()
+    if not path:
+        return False, "未在 PATH 中找到 `opencode` 或 `opencode.cmd`"
+    try:
+        r = _run([path, "--version"], timeout=20.0)
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").strip() or f"exit {r.returncode}"
+            return False, f"`{path}` 执行失败: {err}"
+        return True, (r.stdout or r.stderr or "").strip()
+    except FileNotFoundError:
+        return False, f"无法执行 `{path}`"
+    except subprocess.TimeoutExpired:
+        return False, f"`{path} --version` 超时"
 
 
 def _install_with_default_registry(npm_path: str) -> Tuple[bool, str]:

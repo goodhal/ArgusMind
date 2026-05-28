@@ -101,12 +101,14 @@ def fetch_litellm_provider_list() -> Dict[str, Any]:
         )
         return provider_entries
     except Exception as ex:  # pragma: no cover - 离线或 litellm 未装时降级为空
+        logger.warning("[init_db] litellm provider 清单拉取失败: %s", ex)
         return {"error": str(ex)}
 
 
 def fetch_opencode_provider_list() -> Dict[str, Any]:
     """拉取 OpenCode 的 provider/model 清单（通过本地 opencode 服务）。"""
     tool: OpenCodeTool | None = None
+    service_url = ""
     try:
         project_root = str(Path(__file__).resolve().parents[3])
         directory = str(Path(project_root).anchor or Path(project_root))
@@ -172,7 +174,26 @@ def fetch_opencode_provider_list() -> Dict[str, Any]:
                     service_url,
                 )
                 return {"providers": providers, "source": f"{service_url}/provider"}
+
+            body_preview = (resp.text or "")[:200]
+            logger.warning(
+                "[init_db] opencode provider 清单拉取失败: status=%s url=%s/provider directory=%s body=%s",
+                resp.status_code,
+                service_url,
+                directory,
+                body_preview,
+            )
+            return {
+                "providers": [],
+                "error": f"HTTP {resp.status_code}",
+                "source": f"{service_url}/provider",
+            }
     except Exception as ex:  # pragma: no cover
+        logger.warning(
+            "[init_db] opencode provider 清单拉取失败: url=%s err=%s",
+            service_url or "(服务未启动)",
+            ex,
+        )
         return {"providers": [], "error": str(ex)}
     finally:
         if tool is not None:
@@ -180,6 +201,10 @@ def fetch_opencode_provider_list() -> Dict[str, Any]:
                 tool.close()
             except Exception:
                 pass
+    logger.warning(
+        "[init_db] opencode provider 清单拉取失败: url=%s reason=未返回有效响应",
+        service_url or "(未知)",
+    )
     return {"providers": []}
 
 
