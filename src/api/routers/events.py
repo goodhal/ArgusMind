@@ -5,10 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from src.api.exceptions import NotFoundError
+from src.api.exceptions import BadRequestError, NotFoundError
 from src.api.security import CurrentUserDep
 from src.schemas.common import OkResponse, PageResult
 from src.schemas.event import (
+    EventPageResult,
     EventRead,
     HumanApprovalRead,
     HumanApprovalDecisionRead,
@@ -21,16 +22,29 @@ from src.services.human_interaction_service import get_approval, resolve_approva
 router = APIRouter(dependencies=[CurrentUserDep])
 
 
-@router.get("", response_model=PageResult[EventRead])
+@router.get("", response_model=EventPageResult)
 def list_events(
-    task_id: Optional[str] = Query(None),
-    after_id: Optional[int] = Query(None, ge=1),
-) -> PageResult[EventRead]:
-    rows, total = event_service.list_events(
+    task_id: str = Query(..., description="任务 ID（必填）"),
+    limit: int = Query(200, ge=1, le=500, description="首次加载或向上翻页时每页条数"),
+    before_id: Optional[int] = Query(None, ge=1, description="向上加载更早事件：返回 id < before_id"),
+    after_id: Optional[int] = Query(None, ge=1, description="轮询新事件：返回 id > after_id"),
+) -> EventPageResult:
+    if before_id is not None and after_id is not None:
+        raise BadRequestError("before_id 与 after_id 不能同时使用")
+
+    result = event_service.list_events(
         task_id=task_id,
+        limit=limit,
+        before_id=before_id,
         after_id=after_id,
     )
-    return PageResult[EventRead](data=[EventRead.model_validate(r) for r in rows], total=total)
+    return EventPageResult(
+        data=[EventRead.model_validate(r) for r in result.rows],
+        total=result.total,
+        has_more_older=result.has_more_older,
+        page_oldest_id=result.page_oldest_id,
+        page_newest_id=result.page_newest_id,
+    )
 
 
 @router.get("/{event_id}", response_model=OkResponse[EventRead])

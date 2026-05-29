@@ -16,6 +16,7 @@ from src.core.enums import ActionType
 from src.core.event_span import start_event_span, EventSpan
 from src.agents.base import BaseAgent
 from src.core.task_control import ensure_task_running
+from src.llm import LLMError
 from src.agents.brain import Brain
 from src.agents.prompt.sink_finder import sink_finder_prompt
 from src.agents.prompt.sink_finder_refine import build_sink_refine_system_prompt
@@ -689,6 +690,12 @@ class SinkFinder(BaseAgent):
             )
             try:
                 res, input_tokens, output_tokens = self._llm_step(msg)
+            except LLMError:
+                # LLM 致命错误（额度/鉴权等）：向上抛出，使任务标记失败，
+                # 不能继续重试并最终标记 sink_finder 完成。
+                sink_finder_span.add_llm_tokens(input_tokens, output_tokens)
+                sink_finder_span.mark_failed("LLM 调用发生致命错误")
+                raise
             except ValueError as e:
                 sink_finder_span.add_llm_tokens(input_tokens, output_tokens)
                 msg.append({"role": "assistant", "content": "(模型返回内容无法解析为JSON)"})
@@ -962,6 +969,9 @@ class SinkFinder(BaseAgent):
                     vul_name,
                     sink_res_backup,
                 )
+            except LLMError:
+                # LLM 致命错误（额度/鉴权等）：不可静默回退后继续标记完成，向上抛出。
+                raise
             except Exception as e:
                 self._publish_log(
                     "WARNING",
@@ -1072,6 +1082,10 @@ class SinkRefineAgent(BaseAgent):
             )
             try:
                 step, input_tokens, output_tokens = self._llm_step(conversation)
+            except LLMError:
+                sink_refine_span.add_llm_tokens(input_tokens, output_tokens)
+                sink_refine_span.mark_failed("LLM 调用发生致命错误")
+                raise
             except ValueError as e:
                 sink_refine_span.add_llm_tokens(input_tokens, output_tokens)
                 conversation.append({"role": "assistant", "content": "(模型返回内容无法解析为JSON)"})

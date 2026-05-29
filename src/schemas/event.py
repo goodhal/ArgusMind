@@ -60,6 +60,17 @@ class EventRead(BaseModel):
     detail: Optional[EventDetailRead] = None
 
 
+class EventPageResult(BaseModel):
+    """任务事件列表（游标分页 + 元数据）。"""
+
+    success: bool = True
+    data: List[EventRead]
+    total: int
+    has_more_older: bool = False
+    page_oldest_id: Optional[int] = None
+    page_newest_id: Optional[int] = None
+
+
 class HumanApprovalDecisionRequest(BaseModel):
     approved: bool = True
     operator: str = Field(default="user", max_length=64)

@@ -27,6 +27,7 @@ from src.core.event_span import start_event_span
 from src.core.events import LogEvent, TaskStatusEvent, EventStart
 from src.core.context import ExecutionContext
 from src.core.task_control import TaskPausedError, ensure_task_running
+from src.llm import LLMError
 from src.services.project_service import get_project
 from services.chain_analysis_service import (
     ensure_knowledge_element_id_for_risk_category,
@@ -402,7 +403,9 @@ class Orchestrator:
                                 risk_description=cat_row["risk_description"],
                                 knowledge_element_id=knowledge_element_id,
                             )
-                        except TaskPausedError:
+                        except (TaskPausedError, LLMError):
+                            # LLM 致命错误（额度/鉴权等）必须向上传播，由编排层标记任务失败，
+                            # 不能像普通异常那样仅记日志后继续，否则会被误判为"已完成"。
                             raise
                         except Exception as ex:  # pragma: no cover
                             self._log(
@@ -443,7 +446,9 @@ class Orchestrator:
                             category_name=category_name,
                             knowledge_element_id=knowledge_element_id,
                         )
-                    except TaskPausedError:
+                    except (TaskPausedError, LLMError):
+                        # LLM 致命错误（额度/鉴权等）必须向上传播，由编排层标记任务失败，
+                        # 不能在此 return（会被外层误判为正常结束并标记 completed）。
                         raise
                     except Exception as ex:  # pragma: no cover
                         self._log(ctx.task_id, "ERROR", f"链路分析异常 leaf={leaf_id}: {ex}")

@@ -2,7 +2,7 @@
 """
 ChainConfirmer Agent —— 漏洞链路二次校验 Agent。
 
-对 ChainAnalyzer 产出的 LIKELY_VULNERABLE / POSSIBLY_VULNERABLE 结论进行独立审查，
+对 ChainAnalyzer 产出的 LIKELY_VULNERABLE 结论进行独立审查，
 以"质疑者"视角验证 5 类核心假设是否成立，最终输出三种状态之一：
   - CONFIRMED：漏洞确认
   - REJECTED：驳回（误报）
@@ -29,6 +29,7 @@ from src.agents.prompt.chain_confirmer import (
     chain_confirmer_force_conclude_prompt,
 )
 from src.core.task_control import TaskPausedError
+from src.llm import LLMError
 from services.chain_analysis_service import update_analysis_result_verification, attach_audit_info_record
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class ChainConfirmer(BaseAgent):
     """
     MODULE_NAME = "chain_confirmer"
     DEFAULT_MAX_ROUNDS = 50
-    VERDICTS_NEED_CONFIRMATION = {"LIKELY_VULNERABLE", "POSSIBLY_VULNERABLE"}
+    VERDICTS_NEED_CONFIRMATION = {"LIKELY_VULNERABLE"}
 
     def __init__(self, brain: Optional[Brain] = None, max_rounds: int = DEFAULT_MAX_ROUNDS):
         super().__init__(brain=brain)
@@ -92,7 +93,7 @@ class ChainConfirmer(BaseAgent):
         fetch_sink_chain_context: Callable[[str, Optional[str]], Tuple[str, str]],
     ) -> None:
         """
-        当 verdict 为 LIKELY_VULNERABLE 或 POSSIBLY_VULNERABLE 时，
+        当 verdict 为 LIKELY_VULNERABLE 时，
         执行二次校验，并将结果写回 resolution 和 Neo4j。
 
         Sink 链路与 AuditInfo 上下文由 fetch_sink_chain_context(ar_node_id, knowledge_element_id)
@@ -146,6 +147,15 @@ class ChainConfirmer(BaseAgent):
             self._publish_log(
                 "INFO",
                 f"[ChainConfirmer] 任务已暂停/取消，二次校验中断 "
+                f"branch_id={resolution.get('branch_id', '')}",
+            )
+            raise
+        except LLMError:
+            # LLM 致命错误（额度/鉴权等）不能降级为 REJECTED 后继续，
+            # 必须向上传播以将任务标记为失败。
+            self._publish_log(
+                "ERROR",
+                f"[ChainConfirmer] 二次校验时 LLM 调用发生致命错误，向上抛出 "
                 f"branch_id={resolution.get('branch_id', '')}",
             )
             raise

@@ -39,7 +39,7 @@ RUN pip install --upgrade pip \
 
 # 预装 opencode / gitnexus CLI，避免运行时 npm 在线安装
 RUN npm config set registry https://registry.npmmirror.com \
-    && npm i -g opencode-ai gitnexus
+    && npm i -g opencode-ai@latest gitnexus@latest
 
 # 预装 tokei（来自 tokei-builder 阶段；Debian 无 apt 包）
 COPY --from=tokei-builder /usr/local/cargo/bin/tokei /usr/local/bin/tokei

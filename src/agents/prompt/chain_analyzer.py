@@ -136,9 +136,13 @@ entry_point | param_source | caller | data_flow | sanitizer | validator | authz 
 
 **每轮决策**：未完成阶段 A → 仅读码/读 helper；须写 `record_info` 且未写 → **仅** `record_info`；否则 Survival 可查 caller；**TOOL_RESULT 已含直接上游/Writer 的文件+函数名 → 仅** `neo4j_update_node`（若触发行号补全）或 `insert_node`|`fork`。
 
+**只有两种确定性结论，禁止任何「疑似 / 待定 / 可能」中间态**：
+- `LIKELY_VULNERABLE`：存在从 Source 到 Sink 的可利用路径，或本 Sink 所需防护缺失 / 可绕过；即便利用仍依赖某些环境或配置，只要路径在合理条件下成立即判 `LIKELY_VULNERABLE`。
+- `SAFE`：相关前置条件已被不可绕过地破坏，或防护有效且覆盖本 Sink 所需全部维度。
+**判定原则**：不确定不等于疑似 —— 须继续 `tool_call` 调查直到能给出确定结论；唯有轮次耗尽时按强制收口提示做 Best Effort 二选一。
+
 **final_resolution 强制场景**：(1) entry_point 且入口验证完成；(2) 任意 hop 确认前置条件已死。禁止以信息不足结案；代码不全、caller 未定位、跨媒介写入未定位、防护有效性未证实 → 继续调查。
-- `POSSIBLY_VULNERABLE`：链路已闭环或已无上游，仍依赖环境/配置；**不得**表示调查未完（轮次耗尽时见强制收口提示）。
-- `vul_name`：LIKELY/POSSIBLY 时必填简短名称；SAFE 为 `""`。
+- `vul_name`：`LIKELY_VULNERABLE` 时必填简短名称；`SAFE` 为 `""`。
 
 ### tool_call
 ```json
@@ -187,7 +191,7 @@ entry_point | param_source | caller | data_flow | sanitizer | validator | authz 
   "thought": "verdict 核心依据。",
   "action": "final_resolution",
   "resolution": {{
-    "verdict": "LIKELY_VULNERABLE | POSSIBLY_VULNERABLE | SAFE",
+    "verdict": "LIKELY_VULNERABLE | SAFE",
     "confidence": "HIGH | MEDIUM | LOW",
     "vul_name": "",
     "detail": "Entry→Sink 路径与防御缺失/利用条件；SAFE 时简要说明",
@@ -254,10 +258,10 @@ chain_analyzer_force_conclude_prompt = '''## 强制收口（轮次耗尽）
 
 **要求**
 1. 禁止「需要更多信息」类表述
-2. `verdict` 必为：`LIKELY_VULNERABLE` | `POSSIBLY_VULNERABLE` | `SAFE`
-3. 有 Source→Sink 片段、明显防御缺失或可绕过 → LIKELY 或 POSSIBLY
-4. 强防护且未见绕过 → SAFE（confidence LOW/MEDIUM）
-5. 链路未闭环、上游未确认、分支/配置未决 → 仍须 **POSSIBLY_VULNERABLE**（confidence LOW）
+2. `verdict` 必为二选一：`LIKELY_VULNERABLE` | `SAFE`（无疑似/待定中间态）
+3. 有 Source→Sink 片段、明显防御缺失或可绕过 → `LIKELY_VULNERABLE`
+4. 强防护且未见绕过 → `SAFE`（confidence LOW/MEDIUM）
+5. 链路未闭环、上游未确认、分支/配置未决，但存在合理可利用路径 → 仍判 `LIKELY_VULNERABLE`（confidence LOW）；若证据更偏向防护成立则 `SAFE`（confidence LOW）
 
 `resolution` 须含：已确认路径片段、关键缺口、成立所需假设；字段与常规结案一致。
 
@@ -266,7 +270,7 @@ chain_analyzer_force_conclude_prompt = '''## 强制收口（轮次耗尽）
   "thought": "best-effort 摘要。",
   "action": "final_resolution",
   "resolution": {{
-    "verdict": "LIKELY_VULNERABLE | POSSIBLY_VULNERABLE | SAFE",
+    "verdict": "LIKELY_VULNERABLE | SAFE",
     "confidence": "HIGH | MEDIUM | LOW",
     "vul_name": "存在漏洞时必填；SAFE 为 \"\"",
     "detail": "路径、缺口、假设；勿写需要更多信息",

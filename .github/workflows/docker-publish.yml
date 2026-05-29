@@ -24,16 +24,15 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Update submodules to latest origin/main
+      - name: Update frontend submodule to latest origin/main
         run: |
-          git submodule sync --recursive
-          git submodule update --init --recursive
-          git submodule foreach --recursive "git fetch origin main && git checkout --detach origin/main"
+          chmod +x ./scripts/update-frontend-submodule.sh
+          ./scripts/update-frontend-submodule.sh
 
       - name: Build frontend locally
         run: |
           chmod +x ./build.sh
-          ./build.sh
+          SKIP_DOCKER=1 ./build.sh
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

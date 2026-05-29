@@ -80,14 +80,8 @@ ensure_node20() {
 }
 
 update_frontend_submodule() {
-  [[ -f "$ROOT/.gitmodules" ]] || err "缺少 .gitmodules，无法更新前端子模块"
-  info "同步并初始化前端子模块..."
-  git submodule sync --recursive frontend
-  git submodule update --init --recursive frontend
-
-  info "拉取 frontend 子模块 origin/main 最新代码..."
-  git -C "$FRONTEND_DIR" fetch origin main
-  git -C "$FRONTEND_DIR" checkout --detach origin/main
+  chmod +x "$ROOT/scripts/update-frontend-submodule.sh"
+  "$ROOT/scripts/update-frontend-submodule.sh"
 }
 
 build_frontend() {
@@ -113,7 +107,9 @@ require_git_repo
 ensure_node20
 update_frontend_submodule
 build_frontend
-build_docker_image
+if [[ "${SKIP_DOCKER:-0}" != "1" ]]; then
+  build_docker_image
+fi
 
 cat <<EOF
 

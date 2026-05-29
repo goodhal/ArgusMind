@@ -1,11 +1,11 @@
 """事件仓储"""
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from src.core.enums import ActionType
@@ -20,27 +20,55 @@ class EventRepository:
         stmt = select(EventRecord).options(selectinload(EventRecord.detail)).where(EventRecord.id == event_id)
         return self.session.execute(stmt).scalar_one_or_none()
 
-    def list(
-        self,
-        *,
-        task_id: Optional[str] = None,
-        after_id: Optional[int] = None,
-    ) -> Tuple[List[EventRecord], int]:
-        base = select(EventRecord).options(selectinload(EventRecord.detail))
-        if task_id:
-            base = base.where(EventRecord.task_id == task_id)
-        if after_id is not None:
-            # 滚动加载：继续拉取比当前游标更早的记录（按倒序列表）
-            base = base.where(EventRecord.id > after_id)
-        total = self.session.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-        rows = (
-            self.session.execute(
-                base.order_by(EventRecord.id.desc())
+    def count_for_task(self, task_id: str) -> int:
+        stmt = select(func.count()).select_from(EventRecord).where(EventRecord.task_id == task_id)
+        return int(self.session.execute(stmt).scalar_one())
+
+    def has_older_than(self, task_id: str, event_id: int) -> bool:
+        stmt = select(
+            exists().where(
+                EventRecord.task_id == task_id,
+                EventRecord.id < event_id,
             )
-            .scalars()
-            .all()
         )
-        return list(rows), int(total)
+        return bool(self.session.execute(stmt).scalar_one())
+
+    def _base_stmt(self, task_id: str):
+        return (
+            select(EventRecord)
+            .options(selectinload(EventRecord.detail))
+            .where(EventRecord.task_id == task_id)
+        )
+
+    @staticmethod
+    def _to_asc(rows: List[EventRecord]) -> List[EventRecord]:
+        return list(reversed(rows))
+
+    def list_latest(self, task_id: str, *, limit: int) -> List[EventRecord]:
+        """该任务 id 最大的 limit 条，按 id 升序返回。"""
+        stmt = self._base_stmt(task_id).order_by(EventRecord.id.desc()).limit(limit)
+        rows = self.session.execute(stmt).scalars().all()
+        return self._to_asc(list(rows))
+
+    def list_before(self, task_id: str, *, before_id: int, limit: int) -> List[EventRecord]:
+        """id < before_id 的更早 limit 条，按 id 升序返回。"""
+        stmt = (
+            self._base_stmt(task_id)
+            .where(EventRecord.id < before_id)
+            .order_by(EventRecord.id.desc())
+            .limit(limit)
+        )
+        rows = self.session.execute(stmt).scalars().all()
+        return self._to_asc(list(rows))
+
+    def list_after(self, task_id: str, *, after_id: int) -> List[EventRecord]:
+        """id > after_id 的新事件，按 id 升序返回（轮询）。"""
+        stmt = (
+            self._base_stmt(task_id)
+            .where(EventRecord.id > after_id)
+            .order_by(EventRecord.id.asc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
 
     def add(self, event: EventRecord) -> EventRecord:
         self.session.add(event)

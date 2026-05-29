@@ -17,6 +17,7 @@ from src.agents.tool_output_limit import limit_tool_result
 from src.core.event_bus import get_event_bus
 from src.core.events import LogEvent
 from src.core.task_control import ensure_task_running
+from src.llm import LLMError
 from src.tools.base import ERROR_CODE_CANCELLED
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,15 @@ class BaseAgent:
             ensure_task_running(task_id or "")
             try:
                 result, input_token, output_token = self._brain.ask(conversation)
+            except LLMError:
+                # LLM 服务级致命错误（额度不足/鉴权失败/网络异常等）：
+                # 绝不能吞成"空响应"后继续重试并标记完成，必须向上抛出，
+                # 由编排层将任务标记为 failed。
+                self._publish_log(
+                    "ERROR",
+                    f"[{self._agent_tag}] LLM 调用发生致命错误，终止当前流程（任务将标记为失败）",
+                )
+                raise
             except ValueError as e:
                 conversation.append({"role": "assistant", "content": "(模型返回内容无法解析为JSON)"})
                 conversation.append({

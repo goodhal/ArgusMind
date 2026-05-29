@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from src.infrastructure.db import session_scope
 from src.infrastructure.db.models import EventDetail, EventRecord
@@ -12,6 +13,16 @@ from src.repositories.event_repository import EventRepository
 STATUS_RUNNING = "running"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
+
+
+@dataclass
+class EventListResult:
+    rows: List[EventRecord]
+    total: int
+    has_more_older: bool
+    page_oldest_id: Optional[int]
+    page_newest_id: Optional[int]
+
 
 def create_event(
     *,
@@ -92,18 +103,40 @@ def finish_event(
 
 def list_events(
     *,
-    task_id: Optional[str] = None,
+    task_id: str,
+    limit: int = 200,
+    before_id: Optional[int] = None,
     after_id: Optional[int] = None,
-) -> Tuple[List[EventRecord], int]:
+) -> EventListResult:
+    """三种互斥游标模式：首次加载 / 向上翻历史 / 轮询新事件。"""
     with session_scope() as session:
-        rows, total = EventRepository(session).list(
-            task_id=task_id,
-            after_id=after_id,
+        repo = EventRepository(session)
+        total = repo.count_for_task(task_id)
+
+        if after_id is not None:
+            rows = repo.list_after(task_id, after_id=after_id)
+        elif before_id is not None:
+            rows = repo.list_before(task_id, before_id=before_id, limit=limit)
+        else:
+            rows = repo.list_latest(task_id, limit=limit)
+
+        page_oldest_id = rows[0].id if rows else None
+        page_newest_id = rows[-1].id if rows else None
+        has_more_older = (
+            page_oldest_id is not None and repo.has_older_than(task_id, page_oldest_id)
         )
+
         for r in rows:
             _ = r.detail
             session.expunge(r)
-        return rows, total
+
+        return EventListResult(
+            rows=rows,
+            total=total,
+            has_more_older=has_more_older,
+            page_oldest_id=page_oldest_id,
+            page_newest_id=page_newest_id,
+        )
 
 
 def fail_running_non_information_events_for_task(task_id: str) -> int:

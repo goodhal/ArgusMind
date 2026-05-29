@@ -15,6 +15,7 @@ from src.core.event_span import event_span, start_event_span
 from src.agents.base import BaseAgent
 from src.core.task_control import ensure_task_running
 from src.agents.brain import Brain
+from src.llm import LLMError
 from src.agents.prompt.project_info import (
     opencode_project_info_prompt,
     project_info_compact_system_prompt,
@@ -109,6 +110,11 @@ class ProjectInfo(BaseAgent):
                         self._persist_project_info_to_db(code_res.data if code_res.success else None)
             self._publish_log("INFO", "[ProjectInfo] 项目信息收集流程结束")
             return None
+        except LLMError:
+            # LLM 致命错误（额度/鉴权等）：向上抛出，使任务标记失败，
+            # 不能降级为返回 FAILED 字典后被编排层忽略并标记完成。
+            self._publish_log("ERROR", "[ProjectInfo] 信息收集时 LLM 调用发生致命错误，向上抛出")
+            raise
         except RuntimeError as e:
             self._publish_log("ERROR", f"[ProjectInfo] 收集失败: {e!r}")
             return {
@@ -177,6 +183,14 @@ class ProjectInfo(BaseAgent):
             )
             try:
                 step, input_tokens, output_tokens = self._llm_step(conversation)
+            except LLMError:
+                # LLM 致命错误（额度/鉴权等）：向上抛出而非静默返回，确保任务标记失败。
+                info_span.mark_failed("压缩 LLM 调用发生致命错误")
+                self._publish_log(
+                    "ERROR",
+                    f"[ProjectInfo] 压缩时 LLM 调用发生致命错误 (attempt {attempt + 1})，向上抛出",
+                )
+                raise
             except Exception as e:
                 info_span.mark_failed(f"压缩 LLM 调用异常: {str(e)}")
                 logger.exception("[ProjectInfo] 压缩 LLM 调用异常: %s", e)

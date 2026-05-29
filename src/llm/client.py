@@ -1,13 +1,58 @@
 """LLM 客户端（基于 LiteLLM 统一接口）"""
+import logging
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from src.config import LLMConfig
 
 try:
+    import litellm
     from litellm import completion as litellm_completion
 except ImportError:
+    litellm = None
     litellm_completion = None
+
+logger = logging.getLogger(__name__)
+
+
+class LLMError(RuntimeError):
+    """LLM 调用失败（鉴权失败、额度不足、网络错误、服务异常等）。
+
+    这是一类**致命错误**：调用方不应将其当作"空响应"吞掉后继续重试并标记完成，
+    而应让其向上传播，由编排层把任务标记为 ``failed``。
+
+    Attributes:
+        original: 底层抛出的原始异常（litellm/openai 等）
+        retryable: 是否属于可重试的瞬时错误（已在客户端内重试耗尽）
+        status_code: HTTP 状态码（若可获取），便于排查（401 鉴权 / 402,429 额度等）
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        original: Optional[BaseException] = None,
+        retryable: bool = False,
+        status_code: Optional[int] = None,
+    ) -> None:
+        super().__init__(message)
+        self.original = original
+        self.retryable = retryable
+        self.status_code = status_code
+
+
+# 可重试的瞬时错误（网络/超时/服务暂时不可用/限流）。
+# 限流可能是真正的额度耗尽，也可能是临时节流；统一先按瞬时重试，
+# 重试耗尽后仍会抛出 LLMError，保证不会被当作空响应吞掉。
+_RETRYABLE_EXC_NAMES = frozenset({
+    "Timeout",
+    "APITimeoutError",
+    "APIConnectionError",
+    "ServiceUnavailableError",
+    "InternalServerError",
+    "RateLimitError",
+})
 
 @dataclass
 class LLMResponse:
@@ -84,6 +129,18 @@ class LLMClient:
         kw.update(kwargs)
         return {k: v for k, v in kw.items() if v is not None}
 
+    def _is_retryable_error(self, exc: BaseException) -> bool:
+        """判断 LLM 调用异常是否为可重试的瞬时错误。
+
+        鉴权失败 / 额度不足 / 请求非法 / 上下文超长等视为致命，立即失败，
+        不做无意义的重试。
+        """
+        # 通过异常类型名匹配，避免不同 litellm 版本类路径差异导致 import 失败
+        for klass in type(exc).__mro__:
+            if klass.__name__ in _RETRYABLE_EXC_NAMES:
+                return True
+        return False
+
     def _parse_usage(self, response) -> tuple[int, int, int]:
         """从 LiteLLM 响应中解析 usage，返回 (prompt_tokens, completion_tokens, total_tokens)"""
         prompt_tokens = completion_tokens = total_tokens = 0
@@ -112,17 +169,42 @@ class LLMClient:
 
         Returns:
             LLMResponse：包含 content（回复文本）与 prompt_tokens/completion_tokens/total_tokens
+
+        Raises:
+            LLMError: 调用失败（鉴权/额度/网络/服务异常等），属于致命错误，
+                调用方不应吞掉，应让其向上传播以将任务标记为 failed。
         """
-        try:
-            litellm_kw = self._litellm_kwargs(
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs,
-            )
-            response = litellm_completion(
-                messages=messages,
-                **litellm_kw,
-            )
+        litellm_kw = self._litellm_kwargs(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                response = litellm_completion(
+                    messages=messages,
+                    **litellm_kw,
+                )
+            except Exception as e:
+                last_exc = e
+                retryable = self._is_retryable_error(e)
+                status_code = getattr(e, "status_code", None)
+                if retryable and attempt < self.MAX_RETRIES:
+                    sleep_s = min(2 ** (attempt - 1), 8)
+                    logger.warning(
+                        "LLM 调用瞬时错误，第 %d/%d 次尝试失败，%ss 后重试: %r",
+                        attempt, self.MAX_RETRIES, sleep_s, e,
+                    )
+                    time.sleep(sleep_s)
+                    continue
+                raise LLMError(
+                    f"LLM 调用失败: {e}",
+                    original=e,
+                    retryable=retryable,
+                    status_code=status_code,
+                ) from e
+
             content = response.choices[0].message.content or ""
             prompt_tokens, completion_tokens, total_tokens = self._parse_usage(response)
             return LLMResponse(
@@ -132,8 +214,9 @@ class LLMClient:
                 total_tokens=total_tokens,
                 raw=response,
             )
-        except Exception as e:
-            raise RuntimeError(f"LLM 调用失败: {e}")
+
+        # 理论上不可达：重试循环只会以 return 或 raise 结束
+        raise LLMError(f"LLM 调用失败: {last_exc}", original=last_exc, retryable=True)
 
 
 

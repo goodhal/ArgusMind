@@ -34,6 +34,7 @@ from src.core.task_control import ensure_task_running
 from src.agents.brain import Brain
 from src.agents.chain_confirmer import ChainConfirmer
 from src.core.task_control import TaskPausedError
+from src.llm import LLMError
 from src.agents.prompt.chain_analyzer import (
     chain_analyzer_system_prompt,
     chain_analyzer_force_conclude_prompt, chain_node_prompt,
@@ -78,10 +79,9 @@ class ChainAnalyzer(BaseAgent):
     """
     MODULE_NAME = "chain_analyzer"
     DEFAULT_MAX_ROUNDS = 50
-    VERDICTS_NEED_CONFIRMATION = {"LIKELY_VULNERABLE", "POSSIBLY_VULNERABLE"}
+    VERDICTS_NEED_CONFIRMATION = {"LIKELY_VULNERABLE"}
     VALID_FINAL_VERDICTS = frozenset({
         "LIKELY_VULNERABLE",
-        "POSSIBLY_VULNERABLE",
         "SAFE",
     })
     VALID_FINAL_CONFIDENCE = frozenset({"HIGH", "MEDIUM", "LOW"})
@@ -280,7 +280,8 @@ class ChainAnalyzer(BaseAgent):
                     knowledge_element_id=knowledge_element_id,
                     fetch_sink_chain_context=self._sink_chain_context_from_ar,
                 )
-            except TaskPausedError:
+            except (TaskPausedError, LLMError):
+                # 暂停/取消，或 LLM 致命错误（额度/鉴权等）：不可吞掉，向上传播。
                 raise
             except Exception as e:
                 logger.exception(
@@ -331,13 +332,13 @@ class ChainAnalyzer(BaseAgent):
         if not isinstance(verdict_raw, str) or not verdict_raw.strip():
             return (
                 "resolution.verdict 必填，且只能是以下之一（区分大小写、无多余空格）："
-                "LIKELY_VULNERABLE、POSSIBLY_VULNERABLE、SAFE。"
+                "LIKELY_VULNERABLE、SAFE。"
             )
         verdict = verdict_raw.strip()
         if verdict not in self.VALID_FINAL_VERDICTS:
             return (
                 f"resolution.verdict 当前为 {verdict_raw!r}，取值非法。"
-                "请改为：LIKELY_VULNERABLE、POSSIBLY_VULNERABLE、SAFE 之一。"
+                "请改为：LIKELY_VULNERABLE、SAFE 之一（不存在疑似/待定中间态）。"
             )
 
         conf_raw = resolution.get("confidence")
@@ -357,12 +358,12 @@ class ChainAnalyzer(BaseAgent):
         if verdict in self.VERDICTS_NEED_CONFIRMATION:
             if not vul_name_s:
                 return (
-                    "当 verdict 为 LIKELY_VULNERABLE 或 POSSIBLY_VULNERABLE 时，"
+                    "当 verdict 为 LIKELY_VULNERABLE 时，"
                     "vul_name 不得为空，须根据审计概括漏洞名称。"
                 )
             if not detail_s:
                 return (
-                    "当 verdict 为 LIKELY_VULNERABLE 或 POSSIBLY_VULNERABLE 时，"
+                    "当 verdict 为 LIKELY_VULNERABLE 时，"
                     "detail 不得为空，须描述从 Entry 到 Sink 的路径、防御缺失与利用要点。"
                 )
         else:

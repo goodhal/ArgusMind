@@ -1,7 +1,11 @@
 """FastAPI 应用工厂"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
+
+logger = logging.getLogger(__name__)
 
 from src.api.exceptions import register_exception_handlers
 from src.api.lifespan import lifespan
@@ -26,6 +30,7 @@ API_PREFIX = "/api"
 
 
 def create_app() -> FastAPI:
+    logger.info("[app] 创建 FastAPI 应用并注册路由")
     app = FastAPI(
         title="ArgusMind",
         description="AI 自主代码审计系统",
