@@ -551,30 +551,7 @@ ArgusMind/
 └── requirements.txt
 ```
 
-## 开发与测试
 
-```bash
-# 运行测试
-pytest
-
-# 代码格式化（可选）
-black src tests
-ruff check src
-```
-
-更详细的 Web 控制台需求见 `[docs/WEB_REQUIREMENTS.md](docs/WEB_REQUIREMENTS.md)`。MVP 验证说明见 `[test_dir/MVP_README.md](test_dir/MVP_README.md)`。
-
-## 配置说明摘要
-
-
-| 配置来源                   | 内容                                                  |
-| ---------------------- | --------------------------------------------------- |
-| 环境变量 / `config.yaml`   | 仅 Neo4j、PostgreSQL、`log_level`、`work_dir` 等连接与运行时路径 |
-| PostgreSQL `configs` 表 | LLM、Code Agent、JWT 密钥等业务配置                          |
-| 任务创建参数                 | 被测项目路径、关联 `project_id` 等                            |
-
-
-临时工作目录默认为系统临时目录下的 `ArgusMind/`（与 `src/main.py`、`lifespan` 一致）。
 
 ## 许可证
 
