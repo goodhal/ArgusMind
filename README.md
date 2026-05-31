@@ -48,7 +48,60 @@
 
 <p align="center"><sub>微信群二维码有时效（约 7 天）</sub></p>
 
+## 快速开始
 
+### Docker 安装
+
+适用于 Linux / macOS / WSL，一键拉起 PostgreSQL、Neo4j 与前后端服务。
+
+```bash
+git clone https://github.com/pulseio76/ArgusMind.git
+cd ArgusMind
+chmod +x install.sh
+./install.sh
+```
+
+安装完成后访问 **http://localhost:8006**（API 默认 **6066**）。默认账号 `ArgusMind` / `ArgusMind`，请在「配置管理」中填写 LLM 与 Code Agent 密钥。
+
+### 源码安装
+
+需自行准备 **Python 3.10+**、**Neo4j 5.x**、**PostgreSQL** 与 **Node.js**。
+
+**1. 克隆仓库并安装 Python 依赖**
+
+```bash
+git clone https://github.com/pulseio76/ArgusMind.git
+cd ArgusMind
+
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux / macOS: source .venv/bin/activate
+
+pip install -e .
+cp config.yaml.example config.yaml   # 按环境修改 Neo4j / PostgreSQL 连接
+```
+
+**2. 启动后端**
+
+```bash
+python src/main.py
+```
+
+默认监听 **http://0.0.0.0:6066**。首次启动会自动初始化数据库与默认用户（`ArgusMind` / `ArgusMind`）。
+
+**3. 启动前端服务**
+
+```bash
+git submodule sync --recursive frontend
+git submodule update --init --recursive frontend
+cd frontend
+git fetch origin main
+git checkout --detach origin/main
+npm install
+npm run dev
+```
+
+前端开发服务启动后，按终端提示访问本地地址。
 
 ## 核心能力
 
@@ -413,98 +466,6 @@ flowchart LR
 - **Node.js / npx**（OpenCode、GitNexus 等工具链；启动时会尝试自动检测/安装）
 - **LLM API** 与 **OpenCode 服务**（配置写入数据库，见下文）
 - 可选：**GitNexus**（安装 `pip install -e ".[gitnexus]"` 或 `mcp` 相关依赖）
-
-## 快速开始
-
-### 1. 克隆仓库
-
-```bash
-git clone <repository-url> ArgusMind
-cd ArgusMind
-```
-
-### 2. 安装依赖
-
-```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Linux / macOS
-source .venv/bin/activate
-
-pip install -e .
-
-# 开发依赖（测试、格式化等）
-pip install -e ".[dev]"
-
-# 可选：GitNexus MCP 支持
-pip install -e ".[gitnexus]"
-```
-
-### 3. 配置数据库连接
-
-复制配置样例并按环境修改：
-
-```bash
-cp config.yaml.example config.yaml
-```
-
-或通过环境变量覆盖（优先级：**环境变量 > config.yaml > 默认值**）：
-
-
-| 变量                                                    | 说明            |
-| ----------------------------------------------------- | ------------- |
-| `NEO4J_URI`                                           | Neo4j Bolt 地址 |
-| `NEO4J_USER` / `NEO4J_PASSWORD`                       | Neo4j 凭据      |
-| `POSTGRES_HOST` / `POSTGRES_PORT`                     | PostgreSQL 地址 |
-| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | PostgreSQL 凭据 |
-
-
-> **注意**：除 Neo4j / PostgreSQL 连接信息外，**LLM、OpenCode 等运行配置不得通过环境变量设置**，须写入 PostgreSQL 的 `configs` 表（首次启动时由 `init_db` 种子化，也可通过 `/api/configs` 接口维护）。
-
-### 4. 启动服务
-
-```bash
-python src/main.py
-# 或
-python -m src.main
-```
-
-默认监听 `**http://0.0.0.0:6066**`。启动时会自动：
-
-- 初始化 PostgreSQL 表结构与种子数据（默认用户 `ArgusMind` / 密码 `ArgusMind`，**生产环境请尽快修改**）
-- 尝试连接 Neo4j
-- 预检 ripgrep、Node、OpenCode、tokei 等工具依赖
-
-也可单独初始化数据库：
-
-```bash
-python test_dir/init_db.py
-```
-
-### 5. 配置 LLM 与 Code Agent
-
-服务启动后，通过 API 或数据库更新 `configs` 表中的：
-
-- `LLM_config`：LiteLLM 使用的 provider、key、model、base_url 等
-- `code_agent_config`：OpenCode / Code Agent 的 provider、key、model、base_url 等
-
-相关接口示例（需先登录获取 JWT）：
-
-- `GET /api/configs/llm`、`PUT` 同路径更新
-- `GET /api/configs/code-agent`
-- `GET /api/configs/llm/test`、`GET /api/configs/code-agent/test` 连通性测试
-
-### 6. 创建项目并提交审计任务
-
-1. `POST /api/auth/login` 获取 Token
-2. `POST /api/projects` 注册被测代码库路径
-3. `POST /api/tasks` 创建任务，`GET /api/tasks/{task_id}/run` 或创建时触发运行
-4. 通过 `GET /api/logs`、`GET /api/events`、`GET /api/graph` 等查看进度与结果
-
-交互式 API 文档：`http://localhost:6066/docs`
 
 ## API 概览
 
