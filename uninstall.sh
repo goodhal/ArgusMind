@@ -73,8 +73,9 @@ else
   info "已保留本地数据目录: $HOST_DATA_DIR"
 fi
 
-if ask_yes_no "是否删除 argusmind 镜像（argusmind:latest 及同仓库标签）？" "N"; then
-  image_ids="$(docker images argusmind --format '{{.ID}}' | awk 'NF' | sort -u || true)"
+ARGUSMIND_IMAGE="${ARGUSMIND_IMAGE:-pulseio76/argusmind:latest}"
+if ask_yes_no "是否删除 ArgusMind 镜像（${ARGUSMIND_IMAGE} 及同仓库其它标签）？" "N"; then
+  image_ids="$(docker images pulseio76/argusmind --format '{{.ID}}' | awk 'NF' | sort -u || true)"
   if [[ -n "${image_ids:-}" ]]; then
     while IFS= read -r image_id; do
       [[ -n "$image_id" ]] || continue

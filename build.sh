@@ -9,7 +9,9 @@ info() { echo "[ArgusMind] $*"; }
 err() { echo "[ArgusMind] 错误: $*" >&2; exit 1; }
 
 FRONTEND_DIR="$ROOT/frontend"
-IMAGE_TAG="${1:-argusmind}"
+# 与 Docker Hub 发布名一致；可通过环境变量或第一个参数覆盖
+DEFAULT_IMAGE="pulseio76/argusmind:latest"
+IMAGE_TAG="${1:-${ARGUSMIND_IMAGE:-$DEFAULT_IMAGE}}"
 
 require_git_repo() {
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || err "当前目录不是 Git 仓库"

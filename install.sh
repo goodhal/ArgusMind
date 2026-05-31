@@ -64,6 +64,8 @@ set +a
 DATA_DIR="${DATA_DIR:-./data}"
 PORT="${ARGUSMIND_PORT:-6066}"
 UI_PORT="${ARGUSMIND_UI_PORT:-8006}"
+ARGUSMIND_IMAGE="${ARGUSMIND_IMAGE:-pulseio76/argusmind:latest}"
+export ARGUSMIND_IMAGE
 
 # 规范 DATA_DIR：
 # - 相对路径统一补全为 ./ 前缀（避免 compose 误判为命名卷）
@@ -80,16 +82,36 @@ fi
 
 mkdir -p "$HOST_DATA_DIR/postgres" "$HOST_DATA_DIR/neo4j" "$HOST_DATA_DIR/work" "$HOST_DATA_DIR/repos"
 
-# 确保前端子模块已拉取，避免镜像内出现 Nginx 默认页
-if [[ -f "$ROOT/.gitmodules" ]]; then
-  if [[ ! -f "$ROOT/frontend/package.json" ]]; then
+ensure_image() {
+  info "拉取镜像 ${ARGUSMIND_IMAGE} ..."
+  if docker pull "${ARGUSMIND_IMAGE}"; then
+    return 0
+  fi
+  info "拉取失败（网络、镜像名或 Docker Hub 权限）。"
+  local ans=""
+  if [[ -t 0 ]]; then
+    read -r -p "是否改为本地构建镜像？[y/N] " ans
+  fi
+  case "${ans}" in
+    y|Y|yes|YES)
+      ;;
+    *)
+      err "已取消。可稍后执行: ./build.sh && ${COMPOSE[*]} -f docker-compose.yml up -d"
+      ;;
+  esac
+  if [[ -f "$ROOT/.gitmodules" ]] && [[ ! -f "$ROOT/frontend/package.json" ]]; then
     info "初始化前端子模块 frontend ..."
     git submodule update --init --recursive frontend || err "前端子模块初始化失败，请检查网络或仓库权限"
   fi
-fi
+  chmod +x "$ROOT/build.sh"
+  ARGUSMIND_IMAGE="${ARGUSMIND_IMAGE}" "$ROOT/build.sh"
+  docker image inspect "${ARGUSMIND_IMAGE}" >/dev/null 2>&1 || err "本地构建后仍未找到镜像 ${ARGUSMIND_IMAGE}"
+}
 
-info "构建并启动服务（PostgreSQL + Neo4j + API）..."
-"${COMPOSE[@]}" -f docker-compose.yml up -d --build
+ensure_image
+
+info "启动服务（PostgreSQL + Neo4j + API）..."
+"${COMPOSE[@]}" -f docker-compose.yml up -d
 
 info "等待 API 就绪..."
 for i in $(seq 1 90); do
@@ -131,6 +153,8 @@ cat <<EOF
                ${DATA_DIR}/neo4j     Neo4j
                ${DATA_DIR}/work      应用工作区
                ${DATA_DIR}/repos     被测代码（容器路径 /data/repos/...）
+
+ 应用镜像:     ${ARGUSMIND_IMAGE}
 
  常用命令:
    查看日志:   ${COMPOSE[*]} -f docker-compose.yml logs -f argusmind

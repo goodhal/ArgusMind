@@ -1,5 +1,5 @@
 # ArgusMind 一键部署：PostgreSQL + Neo4j + 单容器前后端
-# 使用方式：./install.sh  或  .\install.ps1
+# 默认镜像 pulseio76/argusmind:latest（Docker Hub）；本地构建: ./build.sh && docker compose up -d
 
 name: argusmind
 
@@ -56,10 +56,8 @@ services:
       - argusmind-net
 
   argusmind:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: argusmind:latest
+    image: ${ARGUSMIND_IMAGE:-pulseio76/argusmind:latest}
+    pull_policy: if_not_present
     container_name: argusmind
     restart: unless-stopped
     depends_on:
