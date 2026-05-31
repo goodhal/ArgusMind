@@ -458,36 +458,6 @@ flowchart LR
 - 浏览器 / 客户端 **不可** 直接拿到 LLM Key；仅通过已鉴权 API 间接使用。
 - 临时文件目录：`{TMP}/ArgusMind/{task_id}/`，由 `globals.TMP_DIR` 与 `Brain` 共同使用。
 
-## 环境要求
-
-- **Python** 3.10 及以上
-- **Neo4j** 5.x（默认 `bolt://127.0.0.1:7687`）
-- **PostgreSQL**（建议单独建库 `argusmind`）
-- **Node.js / npx**（OpenCode、GitNexus 等工具链；启动时会尝试自动检测/安装）
-- **LLM API** 与 **OpenCode 服务**（配置写入数据库，见下文）
-- 可选：**GitNexus**（安装 `pip install -e ".[gitnexus]"` 或 `mcp` 相关依赖）
-
-## API 概览
-
-
-| 前缀                               | 说明                       |
-| -------------------------------- | ------------------------ |
-| `/api/health`、`/api/ready`       | 健康检查                     |
-| `/api/auth`                      | 登录、当前用户、改密               |
-| `/api/projects`                  | 项目管理                     |
-| `/api/tasks`                     | 任务 CRUD、运行/暂停/恢复/取消、批量操作 |
-| `/api/findings`                  | 漏洞发现列表与详情                |
-| `/api/events`                    | 审计事件、OpenCode 事件、人工审批    |
-| `/api/logs`                      | 运行日志                     |
-| `/api/configs`                   | LLM / Code Agent 配置      |
-| `/api/chains`、`/api/chain-graph` | 调用链与图数据                  |
-| `/api/graph`                     | 审计图查询                    |
-| `/api/reports`                   | 任务报告                     |
-| `/api/tokens`                    | Token 用量统计               |
-
-
-除健康检查外，多数接口需要 JWT 认证（`Authorization: Bearer <token>`）。
-
 ## 项目结构
 
 ```
