@@ -1,4 +1,0 @@
-[submodule "frontend"]
-	path = frontend
-	url = https://github.com/pulseio76/ArgusMind-UI.git
-	branch = main
