@@ -1,0 +1,102 @@
+# Framework Model: net/http (Go Standard Library)
+# Source: CodeQL - net.http.model.yml
+#
+# Description: 定义 Go 标准库 net/http 的安全 sink、source 和数据流转规则
+# 
+# CWE 覆盖:
+#   - CWE-078 (命令注入)
+#   - CWE-089 (SQL 注入)
+#   - CWE-079 (XSS)
+#   - CWE-095 (不安全的反序列化)
+#   - CWE-022 (路径遍历)
+
+metadata:
+  name: net/http
+  description: Go 标准库 HTTP 包的安全规则
+  source: CodeQL
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - go
+    - http
+
+sources:
+  # Request 输入源
+  - category: user_input
+    description: HTTP 请求输入
+    functions:
+      - name: net/http.Request.FormValue
+        note: 获取表单值
+        taint: true
+      - name: net/http.Request.PostFormValue
+        note: 获取 POST 表单值
+        taint: true
+      - name: net/http.Request.Query
+        note: 查询参数
+        taint: true
+      - name: net/http.Request.Header
+        note: HTTP 头
+        taint: true
+      - name: net/http.Request.Cookie
+        note: Cookie
+        taint: true
+      - name: net/http.Request.Cookies
+        note: 所有 Cookie
+        taint: true
+      - name: net/http.Request.FormFile
+        note: 上传文件
+        taint: true
+      - name: net/http.Request.Body
+        note: 请求体
+        taint: true
+      - name: net/http.Request.Referer
+        note: Referer 头
+        taint: true
+      - name: net/http.Request.UserAgent
+        note: User-Agent 头
+        taint: true
+      - name: net/http.Request.URL
+        note: 请求 URL
+        taint: true
+      - name: net/http.Request.Form
+        note: 表单数据
+        taint: true
+      - name: net/http.Request.PostForm
+        note: POST 表单数据
+        taint: true
+      - name: net/http.Request.MultipartForm
+        note: 多部分表单
+        taint: true
+      - name: net/http.Request.GetBody
+        note: 获取请求体
+        taint: true
+      - name: net/http.Request.MultipartReader
+        note: 多部分读取器
+        taint: true
+
+sinks:
+  # 危险的 sink 点
+  - category: path_injection
+    description: 路径注入风险
+    functions:
+      - name: net/http.ServeFile
+        note: 提供文件服务 - Argument[2] 是路径
+        severity: high
+        cwe: ["CWE-022"]
+  - category: url_redirection
+    description: URL 重定向风险
+    functions:
+      - name: net/http.Redirect
+        note: URL 重定向 - Argument[2] 是目标 URL
+        severity: medium
+        cwe: ["CWE-601"]
+
+data_flow:
+  - source: net/http.Request.*
+    sink: net/http.*
+    note: 用户输入可能流向各种 HTTP 处理函数
+  - source: net/http.Header.*
+    pass_through: true
+    note: HTTP Header 的操作会传播 taint

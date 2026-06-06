@@ -98,6 +98,9 @@ def get_default_registry(project_path) -> ToolRegistry:
     from src.tools.filesystem import ListFilesTool, ReadFileTool, ReadLinesTool
     from src.tools.neo4j_tools import register_neo4j_tools
     from src.tools.ripgrep import RipgrepFilesTool, RipgrepSearchTool
+    from src.tools.remote_repo import RemoteRepoTool
+    from src.tools.code_search import CodeSearchTool
+    from src.tools.class_hierarchy import ClassHierarchyTool
 
     reg = ToolRegistry(project_path)
     base = Path(str(project_path)).expanduser().resolve(strict=False)
@@ -106,7 +109,8 @@ def get_default_registry(project_path) -> ToolRegistry:
     reg.register(ListFilesTool(base_path=base))
     reg.register(RipgrepFilesTool(base_path=base))
     reg.register(RipgrepSearchTool(base_path=base))
-    # register_neo4j_tools(reg)
-    # reg.register(TokeiTool())
+    reg.register(RemoteRepoTool())
+    reg.register(CodeSearchTool(base_path=base))
+    reg.register(ClassHierarchyTool(base_path=base))
     # OpenCodeTool 需要 project_path 等构造参数，由上层创建后 register
     return reg

@@ -1,0 +1,192 @@
+# Framework Model: Gin (Go Web Framework)
+# Source: CodeQL - github.com.gin-gonic.gin.model.yml
+#
+# Description: 定义 Gin 框架的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-022 (路径遍历)
+#   - CWE-079 (XSS)
+#   - CWE-089 (SQL 注入)
+#   - CWE-601 (URL 重定向)
+
+metadata:
+  name: Gin
+  description: Gin Web 框架的安全规则
+  source: CodeQL
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - go
+    - gin
+    - web
+
+sources:
+  # Gin Context 输入源
+  - category: user_input
+    description: Gin Context 的各种输入方法
+    functions:
+      - name: gin.Context.Query
+        note: 获取查询参数
+        taint: true
+      - name: gin.Context.QueryArray
+        note: 获取查询参数数组
+        taint: true
+      - name: gin.Context.QueryMap
+        note: 获取查询参数 map
+        taint: true
+      - name: gin.Context.DefaultQuery
+        note: 获取查询参数（带默认值）
+        taint: true
+      - name: gin.Context.GetQuery
+        note: 获取查询参数
+        taint: true
+      - name: gin.Context.GetQueryArray
+        note: 获取查询参数数组
+        taint: true
+      - name: gin.Context.GetQueryMap
+        note: 获取查询参数 map
+        taint: true
+      - name: gin.Context.PostForm
+        note: 获取 POST 表单值
+        taint: true
+      - name: gin.Context.PostFormArray
+        note: 获取 POST 表单值数组
+        taint: true
+      - name: gin.Context.PostFormMap
+        note: 获取 POST 表单值 map
+        taint: true
+      - name: gin.Context.DefaultPostForm
+        note: 获取 POST 表单值（带默认值）
+        taint: true
+      - name: gin.Context.GetPostForm
+        note: 获取 POST 表单值
+        taint: true
+      - name: gin.Context.GetPostFormArray
+        note: 获取 POST 表单值数组
+        taint: true
+      - name: gin.Context.GetPostFormMap
+        note: 获取 POST 表单值 map
+        taint: true
+      - name: gin.Context.Param
+        note: 获取路由参数
+        taint: true
+      - name: gin.Context.Params
+        note: 所有路由参数
+        taint: true
+      - name: gin.Context.Cookie
+        note: 获取 Cookie
+        taint: true
+      - name: gin.Context.GetHeader
+        note: 获取 HTTP 头
+        taint: true
+      - name: gin.Context.ContentType
+        note: Content-Type 头
+        taint: true
+      - name: gin.Context.ClientIP
+        note: 客户端 IP
+        taint: true
+      - name: gin.Context.Accepted
+        note: 接受的媒体类型
+        taint: true
+      - name: gin.Context.FullPath
+        note: 完整路由路径
+        taint: true
+      - name: gin.Context.GetString
+        note: 获取上下文字符串值
+        taint: true
+      - name: gin.Context.GetStringMap
+        note: 获取上下文字符串 map
+        taint: true
+      - name: gin.Context.GetStringMapString
+        note: 获取上下文字符串 map
+        taint: true
+      - name: gin.Context.GetStringMapStringSlice
+        note: 获取上下文字符串 slice map
+        taint: true
+      - name: gin.Context.GetStringSlice
+        note: 获取上下文字符串 slice
+        taint: true
+      - name: gin.Context.GetRawData
+        note: 获取原始请求数据
+        taint: true
+      - name: gin.Context.Bind
+        note: 绑定请求数据
+        taint: true
+      - name: gin.Context.BindJSON
+        note: 绑定 JSON 数据
+        taint: true
+      - name: gin.Context.BindXML
+        note: 绑定 XML 数据
+        taint: true
+      - name: gin.Context.BindYAML
+        note: 绑定 YAML 数据
+        taint: true
+      - name: gin.Context.BindQuery
+        note: 绑定查询参数
+        taint: true
+      - name: gin.Context.BindHeader
+        note: 绑定 HTTP 头
+        taint: true
+      - name: gin.Context.BindUri
+        note: 绑定 URI 参数
+        taint: true
+      - name: gin.Context.BindWith
+        note: 自定义绑定
+        taint: true
+      - name: gin.Context.ShouldBind
+        note: 安全绑定
+        taint: true
+      - name: gin.Context.ShouldBindJSON
+        note: 安全绑定 JSON
+        taint: true
+      - name: gin.Context.ShouldBindXML
+        note: 安全绑定 XML
+        taint: true
+      - name: gin.Context.ShouldBindYAML
+        note: 安全绑定 YAML
+        taint: true
+      - name: gin.Context.ShouldBindQuery
+        note: 安全绑定查询参数
+        taint: true
+      - name: gin.Context.ShouldBindUri
+        note: 安全绑定 URI 参数
+        taint: true
+      - name: gin.Context.ShouldBindHeader
+        note: 安全绑定 HTTP 头
+        taint: true
+      - name: gin.Context.ShouldBindWith
+        note: 安全自定义绑定
+        taint: true
+      - name: gin.Context.ShouldBindBodyWith
+        note: 安全绑定请求体
+        taint: true
+      - name: gin.Context.MustBindWith
+        note: 强制绑定
+        taint: true
+
+sinks:
+  - category: path_injection
+    description: 路径注入风险
+    functions:
+      - name: gin.Context.File
+        note: 提供文件 - Argument[0] 是路径
+        severity: high
+        cwe: ["CWE-022"]
+      - name: gin.Context.FileAttachment
+        note: 文件附件下载 - Argument[0] 是路径
+        severity: high
+        cwe: ["CWE-022"]
+      - name: gin.Context.SaveUploadedFile
+        note: 保存上传文件 - Argument[1] 是目标路径
+        severity: high
+        cwe: ["CWE-022"]
+
+data_flow:
+  - source: gin.Context.*
+    sink: gin.Context.*
+    note: Gin Context 的各种输入方法的结果可能流向各种输出方法
+  - source: gin.Params.*
+    pass_through: true
+    note: Params 的操作会传播 taint

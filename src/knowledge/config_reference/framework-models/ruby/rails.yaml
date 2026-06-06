@@ -1,0 +1,187 @@
+# Framework Model: Ruby on Rails
+# Source: CodeQL + ArgusMind
+#
+# Description: 定义 Ruby on Rails 框架的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-022 (路径遍历)
+#   - CWE-078 (命令注入)
+#   - CWE-079 (XSS)
+#   - CWE-089 (SQL 注入)
+#   - CWE-502 (不安全的反序列化)
+#   - CWE-601 (URL 重定向)
+#   - CWE-352 (CSRF)
+
+metadata:
+  name: Ruby on Rails
+  description: Ruby on Rails 框架的安全规则
+  source: CodeQL + ArgusMind
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - rails
+    - ruby
+    - web
+
+sources:
+  - category: user_input
+    description: Rails 请求对象的各种输入
+    functions:
+      - name: ActionController::Parameters
+        note: 控制器参数对象
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: params
+        note: 请求参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: params[]
+        note: 获取参数值
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: request.query_parameters
+        note: 查询参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: request.request_parameters
+        note: 请求参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: request.headers
+        note: HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: request.cookies
+        note: Cookie
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: request.body
+        note: 请求体
+        taint: true
+        security-severity: high
+        precision: high
+      - name: request.path
+        note: 请求路径
+        taint: true
+        security-severity: low
+        precision: high
+      - name: request.url
+        note: 请求 URL
+        taint: true
+        security-severity: low
+        precision: high
+      - name: request.remote_ip
+        note: 客户端 IP
+        taint: true
+        security-severity: low
+        precision: high
+
+sinks:
+  - category: sql_injection
+    description: SQL 注入风险
+    functions:
+      - name: ActiveRecord::Base.find_by_sql
+        note: 原始 SQL 查询
+        severity: critical
+        cwe: ["CWE-089"]
+        security-severity: 8.8
+        precision: high
+      - name: ActiveRecord::Base.connection.execute
+        note: 直接执行 SQL
+        severity: critical
+        cwe: ["CWE-089"]
+        security-severity: 8.8
+        precision: high
+      - name: ActiveRecord::Base.connection.exec_query
+        note: 执行查询
+        severity: critical
+        cwe: ["CWE-089"]
+        security-severity: 8.8
+        precision: high
+
+  - category: xss
+    description: XSS 风险
+    functions:
+      - name: raw
+        note: 标记为原始 HTML
+        severity: high
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: high
+      - name: html_safe
+        note: 标记为安全 HTML
+        severity: high
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: high
+      - name: render
+        note: 渲染模板
+        severity: medium
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: high
+
+  - category: command_injection
+    description: 命令注入风险
+    functions:
+      - name: Kernel.system
+        note: 执行系统命令
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: Kernel.exec
+        note: 执行程序
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: "%x[]"
+        note: 反引号执行命令
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: backtick
+        note: 反引号执行命令
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+
+  - category: path_injection
+    description: 路径遍历风险
+    functions:
+      - name: send_file
+        note: 发送文件
+        severity: critical
+        cwe: ["CWE-022"]
+        security-severity: 9.8
+        precision: high
+      - name: send_data
+        note: 发送数据
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 7.5
+        precision: high
+
+data_flow:
+  - source: params
+    sink: ActiveRecord::Base.find_by_sql
+    note: 参数不应直接用于原始 SQL
+    security-severity: critical
+    precision: high
+  - source: params
+    sink: Kernel.system
+    note: 参数不应直接用于系统命令
+    security-severity: critical
+    precision: high

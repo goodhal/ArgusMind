@@ -1,0 +1,168 @@
+# Framework Model: C/C++ Standard Library
+# Source: CodeQL + ArgusMind
+#
+# Description: 定义 C/C++ 标准库的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-012 (缓冲区溢出)
+#   - CWE-078 (命令注入)
+#   - CWE-089 (SQL 注入)
+#   - CWE-022 (路径遍历)
+#   - CWE-416 (使用后释放)
+#   - CWE-120 (缓冲区复制没有检查边界)
+
+metadata:
+  name: C/C++ Standard Library
+  description: C/C++ 标准库的安全规则
+  source: CodeQL + ArgusMind
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - cpp
+    - c
+    - system
+
+sources:
+  - category: user_input
+    description: 外部输入源
+    functions:
+      - name: stdin
+        note: 标准输入
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: fgets
+        note: 从文件流读取字符串
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: gets
+        note: 从标准输入读取字符串（已废弃，极危险）
+        taint: true
+        security-severity: critical
+        precision: high
+      - name: scanf
+        note: 格式化输入
+        taint: true
+        security-severity: high
+        precision: high
+      - name: sscanf
+        note: 从字符串格式化输入
+        taint: true
+        security-severity: high
+        precision: high
+      - name: getenv
+        note: 获取环境变量
+        taint: true
+        security-severity: medium
+        precision: high
+
+sinks:
+  - category: buffer_overflow
+    description: 缓冲区溢出风险
+    functions:
+      - name: strcpy
+        note: 字符串复制 - 不安全
+        severity: critical
+        cwe: ["CWE-120", "CWE-012"]
+        security-severity: 9.8
+        precision: high
+      - name: strcat
+        note: 字符串拼接 - 不安全
+        severity: critical
+        cwe: ["CWE-120", "CWE-012"]
+        security-severity: 9.8
+        precision: high
+      - name: sprintf
+        note: 格式化输出到字符串 - 不安全
+        severity: critical
+        cwe: ["CWE-120", "CWE-012"]
+        security-severity: 9.8
+        precision: high
+      - name: vsprintf
+        note: 格式化输出到字符串 - 不安全
+        severity: critical
+        cwe: ["CWE-120", "CWE-012"]
+        security-severity: 9.8
+        precision: high
+
+  - category: command_injection
+    description: 命令注入风险
+    functions:
+      - name: system
+        note: 执行系统命令
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: popen
+        note: 打开管道执行命令
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: execl
+        note: 执行程序
+        severity: high
+        cwe: ["CWE-078"]
+        security-severity: 7.8
+        precision: high
+      - name: execv
+        note: 执行程序
+        severity: high
+        cwe: ["CWE-078"]
+        security-severity: 7.8
+        precision: high
+      - name: execlp
+        note: 执行程序（搜索 PATH）
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+      - name: execvp
+        note: 执行程序（搜索 PATH）
+        severity: critical
+        cwe: ["CWE-078"]
+        security-severity: 9.8
+        precision: high
+
+  - category: path_injection
+    description: 路径注入风险
+    functions:
+      - name: fopen
+        note: 打开文件
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 7.5
+        precision: high
+      - name: open
+        note: 打开文件（POSIX）
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 7.5
+        precision: high
+      - name: CreateFile
+        note: 打开文件（Windows）
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 7.5
+        precision: high
+
+data_flow:
+  - source: fgets
+    sink: strcpy
+    note: 用户输入直接复制到缓冲区
+    security-severity: critical
+    precision: high
+  - source: gets
+    sink: strcpy
+    note: 危险的 gets 函数的输出直接复制
+    security-severity: critical
+    precision: high
+  - source: scanf
+    sink: sprintf
+    note: 格式化输入直接用于格式化输出
+    security-severity: high
+    precision: high

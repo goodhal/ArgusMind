@@ -18,6 +18,18 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+# ---------- 动态线程池大小计算 ----------
+def _get_optimal_workers(base: int = 2, max_limit: int = 8) -> int:
+    """根据 CPU 核心数动态计算合适的线程池大小。
+    
+    对于 I/O 密集型任务（如文件扫描），可以设置更高的并发。
+    """
+    cpu_count = os.cpu_count() or 4
+    # I/O 密集型：CPU * 2，最多不超过 max_limit
+    optimal = min(cpu_count * 2, max_limit)
+    return max(base, optimal)
+
+
 import src.storage.manager as db_manager
 from src.core.enums import ActionType
 from src.agents.brain import Brain
@@ -137,7 +149,7 @@ class Orchestrator:
                 error=f"任务执行超时（{elapsed_minutes:.1f} 分钟），已自动取消",
             ))
         except Exception:
-            pass  # 超时处理本身不应抛出异常
+            self._log(ctx.task_id, "WARNING", f"任务超时处理异常: {elapsed_minutes:.1f} 分钟")
 
     # ---------- Neo4j 幂等封装 ----------
     def _ensure_task_node(self, ctx: ExecutionContext) -> str:
@@ -362,8 +374,8 @@ class Orchestrator:
                     if len(content) > 4000:
                         content = content[:4000] + f"\n... (截断，原文 {len(content)} 字符)"
                     snippets.append(f"### {rel_path}\n```\n{content}\n```")
-                except Exception:
-                    snippets.append(f"### {rel_path}\n(无法读取)")
+                except Exception as read_ex:
+                    snippets.append(f"### {rel_path}\n(无法读取: {read_ex})")
 
             # 3) Tokei 语言统计
             tokei_stats = ""
@@ -378,8 +390,8 @@ class Orchestrator:
                     for lang, stats in sorted(langs.items(), key=lambda x: -x[1].get("code", 0)):
                         tokei_stats += f"- **{lang}**: {stats.get('files', 0)} 文件, {stats.get('code', 0)} 行代码\n"
                     tokei_stats += f"\n总计: {total.get('code', 0)} 行代码, {total.get('files', 0)} 文件\n"
-            except Exception:
-                pass
+            except Exception as tokei_ex:
+                self._log(ctx.task_id, "WARNING", f"Tokei 语言统计失败: {tokei_ex}")
 
             # 4) 调用 LLM 分析
             if shared_brain and shared_brain.llm:
@@ -721,8 +733,8 @@ class Orchestrator:
                             try:
                                 from src.services.vulnerability_service import persist_quick_scan_findings
                                 persist_quick_scan_findings(ctx.project_id, ctx.task_id, quick_scan_findings)
-                            except Exception:
-                                pass
+                            except Exception as persist_ex:
+                                self._log(ctx.task_id, "WARNING", f"快速扫描结果持久化失败: {persist_ex}")
                 else:
                     # 联机模式：LLM 验证替代规则过滤
                     # LLM 验证对过滤前的完整结果做判断，避免规则过滤误伤真实漏洞
@@ -851,8 +863,8 @@ class Orchestrator:
                         _text("UPDATE events SET status='completed', finished_at=now() WHERE task_id=:tid AND action_type='planning' AND status='running'"),
                         {"tid": ctx.task_id},
                     )
-            except Exception:
-                pass
+            except Exception as mark_ex:
+                self._log(ctx.task_id, "WARNING", f"标记 planning 事件完成失败: {mark_ex}")
 
             # 3) Sink 发现 + 链路分析（脱机模式跳过，仅使用快速扫描结果）
             if ctx.offline_mode:
@@ -1261,7 +1273,9 @@ class Orchestrator:
                 mark_risk_category_sink_finder_completed(vul_node_id)
 
             if len(pending_categories) > 1:
-                with ThreadPoolExecutor(max_workers=self._MAX_PARALLEL_SINK_FINDERS) as cat_executor:
+                # SinkFinder 并行上限根据 CPU 动态调整（控制 LLM 并发，避免限流）
+                max_sink_workers = _get_optimal_workers(base=2, max_limit=5)
+                with ThreadPoolExecutor(max_workers=max_sink_workers) as cat_executor:
                     futures = {cat_executor.submit(_submit_sink_finder, cr): cr for cr in pending_categories}
                     for future in as_completed(futures):
                         cr = futures[future]
@@ -1291,7 +1305,9 @@ class Orchestrator:
                     # 不中断其他漏洞类型的分析
 
             if len(pending_categories) > 1:
-                with ThreadPoolExecutor(max_workers=self._MAX_PARALLEL_CHAIN_ANALYZERS) as chain_executor:
+                # ChainAnalyzer 并行上限根据 CPU 动态调整（LLM 轮次多，降低并发）
+                max_chain_workers = _get_optimal_workers(base=1, max_limit=2)
+                with ThreadPoolExecutor(max_workers=max_chain_workers) as chain_executor:
                     chain_futures = {chain_executor.submit(_submit_chain_analysis, cr): cr
                                      for cr in pending_categories}
                     for future in as_completed(chain_futures):

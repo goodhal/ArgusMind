@@ -1,0 +1,197 @@
+# Framework Model: Spring Framework (Java)
+# Source: CodeQL + ArgusMind
+#
+# Description: 定义 Spring Framework 的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-022 (路径遍历)
+#   - CWE-078 (命令注入)
+#   - CWE-079 (XSS)
+#   - CWE-089 (SQL 注入)
+#   - CWE-502 (不安全的反序列化)
+#   - CWE-601 (URL 重定向)
+#   - CWE-352 (CSRF)
+#   - CWE-918 (SSRF)
+
+metadata:
+  name: Spring Framework
+  description: Spring Framework 的安全规则
+  source: CodeQL + ArgusMind
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - spring
+    - java
+    - web
+
+sources:
+  - category: user_input
+    description: Spring Web 请求对象的各种输入
+    functions:
+      - name: org.springframework.web.context.request.WebRequest.getParameter
+        note: 获取请求参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.context.request.WebRequest.getParameterValues
+        note: 获取请求参数数组
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.context.request.WebRequest.getParameterMap
+        note: 获取请求参数 Map
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.context.request.WebRequest.getHeader
+        note: 获取 HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.context.request.WebRequest.getHeaderValues
+        note: 获取 HTTP 头数组
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getParameter
+        note: 获取请求参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getParameterValues
+        note: 获取请求参数数组
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getParameterMap
+        note: 获取请求参数 Map
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getHeader
+        note: 获取 HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getHeaders
+        note: 获取 HTTP 头枚举
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getHeaderNames
+        note: 获取所有 HTTP 头名称
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getQueryString
+        note: 获取查询字符串
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getRequestURI
+        note: 获取请求 URI
+        taint: true
+        security-severity: low
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getRequestURL
+        note: 获取请求 URL
+        taint: true
+        security-severity: low
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getCookies
+        note: 获取 Cookie 数组
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getRemoteAddr
+        note: 获取客户端 IP
+        taint: true
+        security-severity: low
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getInputStream
+        note: 获取请求体输入流
+        taint: true
+        security-severity: high
+        precision: high
+      - name: javax.servlet.http.HttpServletRequest.getReader
+        note: 获取请求体读取器
+        taint: true
+        security-severity: high
+        precision: high
+      - name: org.springframework.web.bind.annotation.RequestParam
+        note: 请求参数注解
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.bind.annotation.RequestBody
+        note: 请求体注解
+        taint: true
+        security-severity: high
+        precision: high
+      - name: org.springframework.web.bind.annotation.PathVariable
+        note: 路径变量注解
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: org.springframework.web.bind.annotation.RequestHeader
+        note: 请求头注解
+        taint: true
+        security-severity: medium
+        precision: high
+
+sinks:
+  - category: url_forward
+    description: URL 转发风险
+    functions:
+      - name: org.springframework.web.servlet.ModelAndView.ModelAndView
+        note: 构造函数 - Argument[0] 是视图名
+        severity: medium
+        cwe: ["CWE-601"]
+        security-severity: 6.1
+        precision: high
+      - name: org.springframework.web.servlet.ModelAndView.setViewName
+        note: 设置视图名
+        severity: medium
+        cwe: ["CWE-601"]
+        security-severity: 6.1
+        precision: high
+
+  - category: xss
+    description: XSS 风险
+    functions:
+      - name: org.springframework.web.servlet.ModelAndView.addObject
+        note: 添加模型对象
+        severity: medium
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: medium
+      - name: org.springframework.web.bind.annotation.ResponseBody
+        note: 响应体注解 - 直接返回对象
+        severity: medium
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: medium
+
+  - category: path_injection
+    description: 路径遍历风险
+    functions:
+      - name: org.springframework.core.io.Resource
+        note: 资源加载 - 需验证路径
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 9.8
+        precision: high
+
+data_flow:
+  - source: javax.servlet.http.HttpServletRequest.*
+    sink: org.springframework.web.servlet.ModelAndView.*
+    note: 请求参数不应直接用于视图名
+    security-severity: medium
+    precision: high
+  - source: org.springframework.web.context.request.WebRequest.*
+    sink: java.io.File.*
+    note: 请求参数不应直接用于文件操作
+    security-severity: critical
+    precision: high

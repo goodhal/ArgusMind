@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
@@ -27,6 +27,8 @@ class IdNameItem(BaseModel):
 class OkResponse(BaseModel, Generic[T]):
     success: bool = True
     data: Optional[T] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ErrorResponse(BaseModel):

@@ -2,13 +2,20 @@ import { formatTokenCount } from '@/utils/formatTokenCount';
 
 const FINDING_CATEGORY_LABELS: Record<string, string> = {
   sql_injection: 'SQL 注入',
+  nosql_injection: 'NoSQL 注入',
   xss: 'XSS',
   csrf: 'CSRF',
   ssrf: 'SSRF',
   rce: '远程代码执行',
   command_execution: '命令执行',
   command_injection: '命令注入',
+  code_injection: '代码注入',
+  expression_injection: '表达式注入',
+  ssti: '模板注入',
   file_upload: '文件上传',
+  file_read: '文件读取',
+  file_write: '文件写入',
+  archive_extract: '归档解压',
   path_traversal: '路径遍历',
   info_leak: '信息泄露',
   information_disclosure: '信息泄露',
@@ -17,9 +24,16 @@ const FINDING_CATEGORY_LABELS: Record<string, string> = {
   deserialization: '反序列化',
   xxe: 'XXE',
   ldap_injection: 'LDAP 注入',
+  xpath_injection: 'XPath 注入',
   open_redirect: '开放重定向',
+  crlf_injection: 'CRLF 注入',
   weak_crypto: '弱加密',
+  weak_hash: '弱哈希',
+  predictable_random: '可预测随机',
   misconfiguration: '配置错误',
+  cors_misconfiguration: 'CORS 配置错误',
+  component_vulnerability: '组件漏洞',
+  business_logic: '业务逻辑',
 };
 
 const FINDING_SEVERITY_LABELS: Record<string, string> = {

@@ -4,7 +4,6 @@
 包含：CWE 分类、漏洞模式、OWASP 映射、GB/T 国标映射、语言审计规则、
 漏洞评分体系、证据点定义、组件漏洞规则等。
 """
-from src.knowledge.cwe_categories import CWE_CATEGORIES
 from src.knowledge.vulnerability_patterns import VULNERABILITY_PATTERNS, ALL_VULNERABILITY_DOCS
 from src.knowledge.owasp_mapping import OWASP_MAPPING, OWASP_NAMES
 from src.knowledge.gbt_standards import GBT_STANDARDS, VULN_GBT_MAP, LANGUAGE_GBT_MAP
@@ -112,7 +111,6 @@ from src.knowledge.component_vulns import (
 )
 
 __all__ = [
-    "CWE_CATEGORIES",
     "VULNERABILITY_PATTERNS",
     "ALL_VULNERABILITY_DOCS",
     "OWASP_MAPPING",

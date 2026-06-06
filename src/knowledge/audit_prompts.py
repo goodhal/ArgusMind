@@ -312,72 +312,113 @@ DUAL_VERDICT_SYSTEM = """
   → 原因：CSS 数值不是硬编码密码
 """
 
-# === 语言级安全审计规则（LLM 审计增强） ===
+# === 语言级安全审计规则（LLM 审计增强）===
+# 整合自 AiCodeAudit，提供更详细的输入源、危险点和安全信号定义
 
 LANGUAGE_AUDIT_RULES_LLM: Dict[str, str] = {
     ".py": """
 [Python 审计规则]
-1. 输入源识别：request.args, request.form, request.json, request.values, request.files, input(), sys.argv, os.environ, getenv, 上传文件对象, URL/path 参数
-2. 危险点识别：eval(), exec(), pickle.load/loads, yaml.load (非 safe_load), subprocess.run/Popen/call (shell=True), os.system, SQL 字符串拼接, open/Path.open/read_text/write_text (用户可控路径), 模板直出 (Jinja2 未转义)
-3. 安全信号：yaml.safe_load, html.escape/MarkupSafe.escape, pathlib.Path.resolve(), subprocess 列表参数 (非 shell 模式), 参数化查询 (sqlite3 ?, psycopg2 %s, sqlalchemy bind), pydantic/marshmallow 校验
-4. 判定指引：看到 request 输入进入 SQL/命令/文件/URL/模板 → 优先确认风险；若有 safe_load/参数化/白名单 → 降低级别；仅 import 没有调用 → 不报""",
+1. 输入源识别：request.args, request.form, request.json, request.values, request.files, input(), sys.argv, os.environ, getenv, 上传文件对象, URL 参数, 路径参数
+2. 危险点识别：eval(), exec(), compile(), pickle.load/loads, yaml.load (非 safe_load), subprocess.run/Popen/call (shell=True), os.system, os.popen, SQL 字符串拼接, open/Path.open/read_text/write_text (用户可控路径), 模板直出 (Jinja2 未转义), shelve.open, marshal.load, ast.literal_eval (仅当输入可控时), tempfile 动态路径
+3. 安全信号：yaml.safe_load, json.loads, ast.literal_eval (安全输入), html.escape/MarkupSafe.escape, pathlib.Path.resolve(), subprocess 列表参数 (非 shell 模式), 参数化查询 (sqlite3 ?, psycopg2 %s, sqlalchemy bind), pydantic/marshmallow 校验, pathlib 严格白名单
+4. 判定指引：看到 request 输入进入 SQL/命令/文件/URL/模板 → 优先确认风险；若有 safe_load/参数化/白名单 → 降低级别；仅 import 没有调用 → 不报；模板渲染使用 | safe 过滤器 → 谨慎评估""",
 
     ".js": """
 [JavaScript 审计规则]
-1. 输入源识别：req.query, req.body, req.params, req.headers, req.files, process.env, window.location, document.location, 上传文件对象, URL 参数
-2. 危险点识别：child_process.exec/spawn/execSync, eval(), new Function(), vm.runInNewContext, 字符串拼接 SQL (mysql.query/sequelize.query 拼接), fs.readFile/writeFile/createReadStream/createWriteStream (用户可控路径), fetch/axios URL 拼接, dynamic require/import, innerHTML/dangerouslySetInnerHTML/document.write
-3. 安全信号：path.normalize/join/resolve, prepared statement/参数化查询 (mysql2.execute, sequelize bind), DOMPurify, zod/joi/yup/express-validator, helmet
-4. 判定指引：看到 req.query/body/params 进入 SQL/命令/文件/URL → 优先确认风险；若有 path.resolve+约束/参数化/DOMPurify → 降低级别；前端渲染 undefined → 不算漏洞""",
+1. 输入源识别：req.query, req.body, req.params, req.headers, req.files, process.env, window.location, document.location, 上传文件对象, URL 参数, location.search, location.hash
+2. 危险点识别：child_process.exec/spawn/execSync/spawnSync, eval(), new Function(), vm.runInNewContext/vm.runInThisContext, 字符串拼接 SQL (mysql.query/sequelize.query 拼接), fs.readFile/writeFile/createReadStream/createWriteStream (用户可控路径), fetch/axios/request URL 拼接, dynamic require/import, innerHTML/dangerouslySetInnerHTML/document.write, localStorage/sessionStorage 存储用户输入后渲染
+3. 安全信号：path.normalize/join/resolve, prepared statement/参数化查询 (mysql2.execute, sequelize bind), DOMPurify, zod/joi/yup/express-validator, helmet, textContent, JSON.parse (安全上下文)
+4. 判定指引：看到 req.query/body/params 进入 SQL/命令/文件/URL → 优先确认风险；若有 path.resolve+约束/参数化/DOMPurify → 降低级别；前端渲染 undefined → 不算漏洞；Vue v-html/React dangerouslySetInnerHTML → 重点检查""",
 
     ".ts": """
 [TypeScript 审计规则]
-1. 输入源识别：req.query, req.body, req.params, req.headers, process.env, 上传文件, URL/path 参数
-2. 危险点识别：child_process.exec/spawn/execSync, eval(), new Function(), SQL 字符串拼接, fs.readFile/writeFile (用户可控), fetch/axios URL 拼接, dynamic import
-3. 安全信号：path.normalize/join/resolve, prepared statement/参数化查询, zod/joi/class-validator/nestjs 校验, helmet, TypeScript 类型约束（不视为安全信号）
-4. 判定指引：TypeScript 类型注解不是安全防护，仍需检查运行时输入；其余同 JS""",
+1. 输入源识别：req.query, req.body, req.params, req.headers, process.env, 上传文件, URL/path 参数, 装饰器注入参数
+2. 危险点识别：child_process.exec/spawn/execSync, eval(), new Function(), SQL 字符串拼接, fs.readFile/writeFile (用户可控), fetch/axios URL 拼接, dynamic import, Deno.Command (shell 模式)
+3. 安全信号：path.normalize/join/resolve, prepared statement/参数化查询, zod/joi/class-validator/nestjs 校验, helmet, TypeScript 类型约束（不视为安全信号）, fp-ts/io-ts 运行时校验
+4. 判定指引：TypeScript 类型注解不是安全防护，仍需检查运行时输入；NestJS @Body/@Param 后仍需校验；其余同 JS""",
 
     ".java": """
 [Java 审计规则]
-1. 输入源识别：request.getParameter(), @RequestParam, @PathVariable, @RequestBody, System.getenv, MultipartFile, 上传文件名, URL 参数, Cookie
-2. 危险点识别：Runtime.exec(), ProcessBuilder, JDBC Statement.execute/executeQuery/executeUpdate (字符串拼接), Hibernate HQL 拼接, JdbcTemplate 拼接, FileInputStream/FileOutputStream (用户可控路径), HttpURLConnection/RestTemplate/WebClient URL 拼接, ObjectInputStream (反序列化), XMLDecoder, XStream, ScriptEngine.eval, GroovyShell
-3. 安全信号：PreparedStatement (参数绑定), @PreAuthorize/@RolesAllowed/hasRole, Paths.get/toRealPath/normalize, @Valid + BindingResult, Spring Security 全局配置
-4. 判定指引：看到 request.getParameter/@RequestParam 进入 SQL/命令/文件/URL → 优先确认风险；有 PreparedStatement/参数绑定 → 降低级别；Spring Security 全局 CSRF → 不报 CSRF""",
+1. 输入源识别：request.getParameter(), @RequestParam, @PathVariable, @RequestBody, @RequestHeader, System.getenv, MultipartFile, 上传文件名, URL 参数, Cookie, HttpSession 属性
+2. 危险点识别：Runtime.exec(), ProcessBuilder, JDBC Statement.execute/executeQuery/executeUpdate (字符串拼接), Hibernate HQL 拼接, JdbcTemplate 拼接, FileInputStream/FileOutputStream/RandomAccessFile (用户可控路径), HttpURLConnection/RestTemplate/WebClient/FeignClient URL 拼接, ObjectInputStream (反序列化), XMLDecoder, XStream, ScriptEngine.eval, GroovyShell, JNDI 查找 (用户可控名称)
+3. 安全信号：PreparedStatement (参数绑定), @PreAuthorize/@RolesAllowed/hasRole, Paths.get/toRealPath/normalize, @Valid + BindingResult, Spring Security 全局配置, @CrossOrigin (配置正确), @SafeHtml, ESAPI 编码
+4. 判定指引：看到 request.getParameter/@RequestParam 进入 SQL/命令/文件/URL → 优先确认风险；有 PreparedStatement/参数绑定 → 降低级别；Spring Security 全局 CSRF → 不报 CSRF；@Valid 校验通过 → 降低级别""",
 
     ".go": """
 [Go 审计规则]
-1. 输入源识别：r.URL.Query(), r.FormValue(), r.PostFormValue(), c.Param()/c.Query()/c.PostForm() (gin), ShouldBindJSON/BindJSON, os.Getenv, 上传文件, URL/path 参数
-2. 危险点识别：exec.Command (配合 sh -c 或用户可控参数), database/sql db.Query/db.Exec (拼接 SQL), os.Open/os.Create (用户可控路径), http.Get/http.Post (用户可控 URL), template.HTML (text/template 无转义)
-3. 安全信号：html/template (自动转义), Query/Exec 占位符 (?/$1), PreparedStatement, filepath.Clean/Join, validator 绑定, ShouldBind 校验, r.Context()
-4. 判定指引：看到 Query/FormValue/BindJSON 进入 SQL/命令/文件/URL → 优先确认风险；html/template 自动转义, 参数化 → 降低级别""",
+1. 输入源识别：r.URL.Query(), r.FormValue(), r.PostFormValue(), c.Param()/c.Query()/c.PostForm() (gin), ShouldBindJSON/BindJSON/Bind (gin/beego), os.Getenv, 上传文件, URL/path 参数, http.Request.Body
+2. 危险点识别：exec.Command (配合 sh -c 或用户可控参数), database/sql db.Query/db.Exec (拼接 SQL), os.Open/os.Create/os.OpenFile (用户可控路径), http.Get/http.Post/http.NewRequest (用户可控 URL), template.HTML/template.URL (text/template 无转义), unsafe.Pointer 操作, reflect.Value 设置
+3. 安全信号：html/template (自动转义), Query/Exec 占位符 (?/$1), PreparedStatement, filepath.Clean/Join, validator 绑定 (go-playground/validator), ShouldBind 校验, r.Context() 传递, crypto/rand (而非 math/rand)
+4. 判定指引：看到 Query/FormValue/BindJSON 进入 SQL/命令/文件/URL → 优先确认风险；html/template 自动转义, 参数化 → 降低级别；crypto/rand 用于敏感值 → 安全信号""",
 
     ".php": """
 [PHP 审计规则]
-1. 输入源识别：$_GET, $_POST, $_REQUEST, $_FILES, $_COOKIE, $_SERVER, $_ENV, file_get_contents('php://input'), URL 参数, 路径参数
-2. 危险点识别：system/exec/shell_exec/passthru/proc_open, mysqli_query/mysql_query (拼接 SQL), PDO::query (拼接 SQL), include/require/include_once/require_once (动态路径), file_get_contents/fopen/fwrite (用户可控路径), unserialize, eval, preg_replace /e, create_function
-3. 安全信号：PDO::prepare + bindValue/bindParam, filter_input/filter_var, htmlspecialchars, realpath/basename, password_hash/password_verify, CSRF token 校验
-4. 判定指引：看到 $_GET/$_POST 进入 SQL/include/system/文件 → 优先确认风险；PDO prepare + bind → 降低级别""",
+1. 输入源识别：$_GET, $_POST, $_REQUEST, $_FILES, $_COOKIE, $_SERVER, $_ENV, file_get_contents('php://input'), URL 参数, 路径参数, parse_str 解析结果
+2. 危险点识别：system/exec/shell_exec/passthru/proc_open/popen, mysqli_query/mysql_query (拼接 SQL), PDO::query (拼接 SQL), include/require/include_once/require_once (动态路径), file_get_contents/fopen/fwrite/file_put_contents (用户可控路径), unserialize, eval, preg_replace /e, create_function, array_map 配合回调注入, ReflectionClass 动态调用
+3. 安全信号：PDO::prepare + bindValue/bindParam, filter_input/filter_var, htmlspecialchars/htmlentities, realpath/basename, password_hash/password_verify, CSRF token 校验, OpenSSL 加密, PHP_SELF 过滤
+4. 判定指引：看到 $_GET/$_POST 进入 SQL/include/system/文件 → 优先确认风险；PDO prepare + bind → 降低级别；realpath + 目录白名单 → 安全信号；allow_url_include=On + 动态路径 → 高危""",
 
     ".c": """
 [C 审计规则]
-1. 输入源识别：argv, getenv, recv/read/fgets/scanf, socket 输入, 文件名/路径参数
-2. 危险点识别：system/popen/execl/execv, sprintf/strcpy/strcat/gets (无边界), fopen/open (用户可控路径), 动态加载 dlopen, 认证逻辑绕过
-3. 安全信号：snprintf/strncpy (有边界), realpath, strlen/sizeof 结合边界检查, strncmp/memcmp
-4. 判定指引：仅凭 malloc/free/strdup/xstrdup 不报漏洞；需要可控输入+危险操作+缺失边界才报""",
+1. 输入源识别：argv, getenv/secure_getenv, recv/read/fgets/scanf/sscanf, socket 输入, 文件名/路径参数, fread 从不可信文件
+2. 危险点识别：system/popen/execl/execv/execvp, sprintf/strcpy/strcat/gets/scanf (无边界), fopen/open/creat (用户可控路径), 动态加载 dlopen/dlsym, 认证逻辑绕过, setuid/setgid 程序漏洞
+3. 安全信号：snprintf/strncpy/strncat/fgets (有边界), realpath/realpathat, strlen/sizeof 结合边界检查, strncmp/memcmp, FD_CLOEXEC 标志, 权限检查 (access/chmod)
+4. 判定指引：仅凭 malloc/free/strdup/xstrdup 不报漏洞；需要可控输入+危险操作+缺失边界才报；看到 gets/sprintf 直接使用 → 优先标记""",
 
     ".cpp": """
 [C++ 审计规则]
-1. 输入源识别：argv, getenv, recv/read/gets/scanf, std::cin, 文件名/路径参数
-2. 危险点识别：system/popen, sprintf/strcpy/strcat, std::ifstream/ofstream/fstream (用户可控路径), 命令执行, 认证绕过
-3. 安全信号：snprintf, std::filesystem::canonical, std::array, std::regex 校验, std::clamp, size()
-4. 判定指引：仅凭内存分配/释放/字符串复制不报漏洞；需要可控输入+危险操作+缺失防护""",
+1. 输入源识别：argv, getenv, recv/read/gets/scanf/cin, std::cin/std::getline, 文件名/路径参数, 网络流输入
+2. 危险点识别：system/popen, sprintf/strcpy/strcat, std::ifstream/std::ofstream/std::fstream (用户可控路径), std::system, 命令执行, 认证绕过, reinterpret_cast 危险转换, std::shared_ptr 循环引用
+3. 安全信号：snprintf/std::snprintf, std::filesystem::canonical/weakly_canonical, std::array/std::string (自动边界), std::regex 校验, std::clamp, size() 检查, std::unique_ptr/std::shared_ptr 智能指针
+4. 判定指引：仅凭内存分配/释放/普通字符串复制不报漏洞；需要可控输入+危险操作+缺失防护；智能指针自动管理 → 安全信号；std::filesystem 规范化路径 → 安全信号""",
 
     ".cs": """
 [C# 审计规则]
-1. 输入源识别：Request.Query, Request.Form, Request.Body, Request.Headers, IFormFile, Environment.GetEnvironmentVariable, URL/path 参数
-2. 危险点识别：Process.Start, SqlCommand.ExecuteReader/ExecuteNonQuery (拼接 SQL), File.ReadAllText/WriteAllText/OpenRead/OpenWrite (用户可控路径), HttpClient.GetAsync/PostAsync (用户可控 URL), BinaryFormatter/SoapFormatter (反序列化), XPathNavigator/XPathExpression
-3. 安全信号：SqlParameter/SqlCommand 参数化, Path.GetFullPath/Path.Combine, [Authorize]/[AllowAnonymous], ModelState.IsValid, DataAnnotations/FluentValidation, AntiForgeryToken (CSRF)
-4. 判定指引：看到 Request 输入进入 SQL/Process/文件/URL → 优先确认风险；参数化查询/SqlParameter → 降低级别；[Authorize] 全局启用 → 不报认证绕过""",
+1. 输入源识别：Request.Query, Request.Form, Request.Body, Request.Headers, IFormFile, Environment.GetEnvironmentVariable, URL/path 参数, RouteData.Values, Session 数据
+2. 危险点识别：Process.Start, ProcessStartInfo (UseShellExecute=true), SqlCommand.ExecuteReader/ExecuteNonQuery (拼接 SQL), File.ReadAllText/WriteAllText/OpenRead/OpenWrite (用户可控路径), HttpClient.GetAsync/PostAsync (用户可控 URL), BinaryFormatter/SoapFormatter/DataContractSerializer (反序列化), XPathNavigator/XPathExpression, Activator.CreateInstance (用户可控类型)
+3. 安全信号：SqlParameter/SqlCommand 参数化, Path.GetFullPath/Path.Combine, [Authorize]/[AllowAnonymous], ModelState.IsValid, DataAnnotations/FluentValidation, AntiForgeryToken (CSRF), System.Web.Security.AntiXss.AntiXssEncoder, System.Security.Cryptography 加密
+4. 判定指引：看到 Request 输入进入 SQL/Process/文件/URL → 优先确认风险；参数化查询/SqlParameter → 降低级别；[Authorize] 全局启用 → 不报认证绕过；UseShellExecute=false + 参数数组 → 安全信号""",
 }
+
+# === 代码质量规则（从 open-code-review 借鉴） ===
+
+CODE_QUALITY_RULES = """
+【代码质量规则】
+
+## 1. 空代码检测 (Dead Code)
+
+### 检测内容：
+- **不可达代码**：条件永远为 false 的分支、return/throw 后的代码
+- **未使用变量**：声明后未读取的变量、未使用的函数参数
+- **注释代码块**：超过 3 行的注释代码（无保留意图说明）
+- **无效代码**：空循环体、无意义的语句
+
+### 严重级别：
+- 不可达代码 → medium（可能隐藏逻辑错误）
+- 未使用变量 → low（代码冗余）
+- 注释代码块 → low（代码混乱）
+
+### 排除情况：
+- 测试代码中的占位变量
+- 有意保留的注释代码（有说明）
+- 调试代码（有明显标记如 // TODO: remove）
+
+## 2. 拼写错误检测 (Spelling)
+
+### 检测内容：
+- **标识符拼写错误**：变量名、函数名、类名
+- **字符串内容拼写错误**：日志消息、错误消息、用户可见文本
+
+### 检测原则：
+- 只在声明位置报告，不在引用位置报告
+- 符合项目命名约定的名称不报告
+- 专有名词不报告
+
+### 严重级别：
+- 标识符拼写错误 → low（影响可读性）
+- 日志/错误消息拼写错误 → low（影响排查）
+- 用户可见文本拼写错误 → medium（影响用户体验）
+"""
 
 
 def build_audit_system_prompt(
@@ -388,6 +429,7 @@ def build_audit_system_prompt(
     include_dedup_rules: bool = True,
     include_dual_verdict: bool = True,
     include_language_rules: bool = True,
+    include_code_quality: bool = True,
 ) -> str:
     """构建审计系统提示词。
 
@@ -408,6 +450,9 @@ def build_audit_system_prompt(
 
     if include_evidence_contract:
         parts.append(EVIDENCE_CONTRACT_GUIDE)
+
+    if include_code_quality:
+        parts.append(CODE_QUALITY_RULES)
 
     if include_dedup_rules:
         parts.append(DE_DUPLICATION_RULES)
@@ -433,3 +478,67 @@ def build_audit_system_prompt(
                 parts.append(JAVA_FRAMEWORK_DETECTION)
 
     return "\n\n".join(parts)
+
+
+# === 结构化输出格式规范（从 AiCodeAudit 借鉴）===
+
+STRUCTURED_OUTPUT_FORMAT = """
+【结构化输出格式规范】
+
+## 输出格式要求：
+1. 只能输出纯文本
+2. 不能输出 Markdown 代码块
+3. 必须严格按照标签结构输出
+4. 标签名、字段名必须完全一致，不能增删改
+5. 每个字段单独占一行，字段值写在冒号后
+6. 需要多行正文的字段必须写在专用标签内
+7. 不允许输出任何解释、前后缀、备注、分析过程
+
+## 结果1：发现漏洞时
+<审计报告>
+<文件>
+路径: /src/example.py
+结论: 存在风险
+<漏洞>
+类型: SQL注入
+判定: 确认风险
+等级: 高危
+位置: L47-L49
+<代码特征>
+db.Exec("SELECT * FROM users WHERE name = '" + username + "'")
+</代码特征>
+<攻击向量>
+攻击者控制 username 并进入 SQL 拼接语句
+</攻击向量>
+<潜在影响>
+可导致任意用户数据查询和认证绕过
+</潜在影响>
+<修复建议>
+改为参数化查询，禁止字符串拼接 SQL
+</修复建议>
+</漏洞>
+</文件>
+</审计报告>
+
+## 结果2：未发现漏洞时
+<审计报告>
+<结论>审计通过</结论>
+</审计报告>
+
+## 附加规则：
+1. 每条漏洞都必须引用实际代码证据
+2. 没有代码证据，不得输出"确认风险"
+3. 同一问题不要重复报告
+4. 若只是"代码质量问题"而非"安全问题"，输出"审计通过"
+5. 若某代码片段本身是安全封装、校验函数、释放函数、日志函数，默认不报漏洞
+6. 如果只是调用名可疑，但上下文中看不到输入源、危险点或缺失防护证据，输出"审计通过"
+7. 如果输出 <文件>，其中至少要包含 1 个 <漏洞>
+8. 判定只能是：确认风险 / 可疑风险
+9. 等级只能是：高危 / 中危 / 低危 / 信息
+10. 位置必须写成 L起始行-L结束行；若只能确认单行，写成 L12-L12
+11. <代码特征> 内只能放关键证据代码，不要加入解释
+12. <攻击向量>、<潜在影响>、<修复建议> 必须是完整句子，不能留空
+13. 对"可疑风险"，必须在 <攻击向量> 或 <潜在影响> 中明确写出当前还缺少哪些证据
+14. 如果同一文件中有多个问题，可以输出多个 <漏洞>
+15. 若"安全信号"明显强于"危险点线索"，且源码也显示已有参数化、白名单、路径约束、鉴权或转义措施，应优先输出"审计通过"
+"""

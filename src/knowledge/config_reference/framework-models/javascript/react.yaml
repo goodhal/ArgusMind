@@ -1,0 +1,65 @@
+# Framework Model: React (JavaScript/TypeScript)
+# Source: CodeQL - react.model.yml
+#
+# Description: 定义 React 框架的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-079 (XSS - 跨站脚本)
+#   - CWE-089 (SQL 注入)
+#   - CWE-094 (代码注入)
+
+metadata:
+  name: React
+  description: React 框架的安全规则
+  source: CodeQL
+  version: 1.0
+  security-severity: medium
+  precision: high
+  tags:
+    - security
+    - javascript
+    - react
+    - web
+
+sources:
+  - category: user_input
+    description: 用户输入源
+    functions:
+      - name: useState
+        note: 状态 Hook - 可能包含用户输入
+        taint: true
+      - name: useReducer
+        note: Reducer Hook - 状态可能包含用户输入
+        taint: true
+      - name: useContext
+        note: Context Hook - 上下文中的数据可能被污染
+        taint: true
+
+sinks:
+  - category: xss
+    description: XSS 风险
+    functions:
+      - name: dangerouslySetInnerHTML
+        note: 危险的 innerHTML 设置 - __html 属性值
+        severity: critical
+        cwe: ["CWE-079"]
+      - name: ReactDOM.render
+        note: 渲染方法 - 需确保内容安全
+        severity: medium
+        cwe: ["CWE-079"]
+      - name: ReactDOMServer.renderToString
+        note: 服务端渲染 - 需确保内容安全
+        severity: medium
+        cwe: ["CWE-079"]
+      - name: ReactDOMServer.renderToStaticMarkup
+        note: 静态标记渲染 - 需确保内容安全
+        severity: medium
+        cwe: ["CWE-079"]
+
+data_flow:
+  - source: useState
+    sink: dangerouslySetInnerHTML
+    note: 状态值可能直接用于 innerHTML
+  - source: useReducer
+    sink: dangerouslySetInnerHTML
+    note: Reducer 状态值可能直接用于 innerHTML

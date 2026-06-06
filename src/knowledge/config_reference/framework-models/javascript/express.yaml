@@ -1,0 +1,183 @@
+# Framework Model: Express (Node.js Web Framework)
+# Source: CodeQL + ArgusMind
+#
+# Description: 定义 Express 框架的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-022 (路径遍历)
+#   - CWE-078 (命令注入)
+#   - CWE-079 (XSS)
+#   - CWE-089 (SQL 注入)
+#   - CWE-502 (不安全的反序列化)
+#   - CWE-601 (URL 重定向)
+#   - CWE-352 (CSRF)
+#   - CWE-693 (安全配置错误)
+
+metadata:
+  name: Express
+  description: Express Web 框架的安全规则
+  source: CodeQL + ArgusMind
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - express
+    - nodejs
+    - web
+
+sources:
+  - category: user_input
+    description: Express 请求对象的各种输入
+    functions:
+      - name: express.request.query
+        note: 查询参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.body
+        note: 请求体
+        taint: true
+        security-severity: high
+        precision: high
+      - name: express.request.params
+        note: 路由参数
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.cookies
+        note: Cookie
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.signedCookies
+        note: 签名 Cookie
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.headers
+        note: HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.rawHeaders
+        note: 原始 HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.url
+        note: 请求 URL
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.path
+        note: 请求路径
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.hostname
+        note: 主机名
+        taint: true
+        security-severity: medium
+        precision: high
+      - name: express.request.ip
+        note: 客户端 IP
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.ips
+        note: 代理 IP 列表
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.protocol
+        note: 协议
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.subdomains
+        note: 子域名列表
+        taint: true
+        security-severity: low
+        precision: high
+      - name: express.request.get
+        note: 获取 HTTP 头
+        taint: true
+        security-severity: medium
+        precision: high
+
+sinks:
+  - category: path_injection
+    description: 路径遍历风险
+    functions:
+      - name: express.response.sendFile
+        note: 发送文件 - 路径参数需验证
+        severity: critical
+        cwe: ["CWE-022"]
+        security-severity: 9.8
+        precision: high
+      - name: express.static
+        note: 静态文件服务 - 需配置正确
+        severity: high
+        cwe: ["CWE-022"]
+        security-severity: 7.5
+        precision: high
+
+  - category: xss
+    description: XSS 风险
+    functions:
+      - name: express.response.send
+        note: 发送响应 - 需确保内容安全
+        severity: medium
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: medium
+      - name: express.response.json
+        note: 发送 JSON - 通常安全但需注意
+        severity: low
+        cwe: ["CWE-079"]
+        security-severity: 4.3
+        precision: high
+      - name: express.response.render
+        note: 渲染模板 - 需使用安全模板引擎
+        severity: medium
+        cwe: ["CWE-079"]
+        security-severity: 6.1
+        precision: high
+
+  - category: url_redirection
+    description: URL 重定向风险
+    functions:
+      - name: express.response.redirect
+        note: URL 重定向 - 需验证目标URL
+        severity: medium
+        cwe: ["CWE-601"]
+        security-severity: 6.1
+        precision: high
+
+  - category: cors
+    description: CORS 配置风险
+    functions:
+      - name: cors
+        note: CORS 中间件 - origin 参数需限制
+        severity: medium
+        cwe: ["CWE-942", "CWE-346"]
+        security-severity: 6.1
+        precision: high
+
+data_flow:
+  - source: express.request.*
+    sink: fs.*
+    note: 请求输入不应直接传给文件系统操作
+    security-severity: critical
+    precision: high
+  - source: express.request.*
+    sink: child_process.*
+    note: 请求输入不应直接传给子进程
+    security-severity: critical
+    precision: high
+  - source: express.request.*
+    sink: express.response.*
+    note: 请求输入需经过处理后才能输出
+    security-severity: medium
+    precision: high

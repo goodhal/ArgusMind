@@ -108,6 +108,17 @@ chain_analyzer_system_prompt = '''
 entry_point | param_source | caller | data_flow | sanitizer | validator | authz | state | config
 </hop_protocol>
 
+<attacker_scope>
+## 外部攻击者范围约束
+**仅报告外部攻击者可利用的漏洞**。排除以下场景：
+- 需要内部网络访问（VPN、内网 IP、非公网端口）
+- 需要直接服务器访问（SSH、物理访问、本地调试）
+- 需要已认证的内部用户权限（管理员、运维、内部员工）
+- 仅在开发/测试环境触发（开发服务器、调试模式、本地配置）
+
+**判定标准**：漏洞入口必须可通过公网接口（HTTP/HTTPS/WebSocket）被未认证攻击者触发。内部 API、管理后台、定时任务、消息队列消费者等，除非有证据证明可被外部触发，否则默认排除。
+</attacker_scope>
+
 <exploitability_gate>
 ## 可利用性三连证（判 `LIKELY_VULNERABLE` 的**充分必要条件**）
 二次校验只审「已声称成立」的漏洞；**下列任一项未用读码证据证实，初次分析必须判 `SAFE`**，不得输出「疑似」或把缺口写成「攻击者若能控制…」留给下游。

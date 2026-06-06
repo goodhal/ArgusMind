@@ -1,7 +1,49 @@
 $schema: ./rules-schema.yaml
 language: php
 taintTracking:
-  sources: []
+  sources:
+    - id: SRC-GET-001
+      name: $_GET Superglobal
+      patterns:
+        - \$_GET\[
+      category: user_input
+      severity: MEDIUM
+    - id: SRC-POST-001
+      name: $_POST Superglobal
+      patterns:
+        - \$_POST\[
+      category: user_input
+      severity: MEDIUM
+    - id: SRC-REQUEST-001
+      name: $_REQUEST Superglobal
+      patterns:
+        - \$_REQUEST\[
+      category: user_input
+      severity: HIGH
+    - id: SRC-COOKIE-001
+      name: $_COOKIE Superglobal
+      patterns:
+        - \$_COOKIE\[
+      category: user_input
+      severity: MEDIUM
+    - id: SRC-INPUT-001
+      name: php://input Raw Input
+      patterns:
+        - php://input
+      category: user_input
+      severity: HIGH
+    - id: SRC-FILES-001
+      name: $_FILES Upload
+      patterns:
+        - \$_FILES\[
+      category: user_input
+      severity: HIGH
+    - id: SRC-SERVER-001
+      name: $_SERVER Headers
+      patterns:
+        - \$_SERVER\['HTTP_
+      category: user_input
+      severity: MEDIUM
   sinks:
     - id: SEC-CMD-003
       name: Command Execution
@@ -13,6 +55,7 @@ taintTracking:
         - popen\(
         - proc_open\(
         - pcntl_exec\(
+        - "`[^`]*`"
       category: command_exec
       severity: CRITICAL
       profiles:
@@ -31,6 +74,12 @@ taintTracking:
         - mysqli_query\(
         - pg_query\(
         - mysqli_real_query\(
+        - \$pdo->query\(
+        - \$pdo->exec\(
+        - \$pdo->prepare\(
+        - DB::select\(DB::raw
+        - whereRaw\(
+        - orderByRaw\(
       category: sql_injection
       severity: HIGH
       profiles:
@@ -48,6 +97,7 @@ taintTracking:
         - eval\(
         - assert\(
         - create_function\(
+        - preg_replace.*[eE]
       category: code_injection
       severity: CRITICAL
       profiles:
@@ -63,10 +113,16 @@ taintTracking:
       name: File Operation
       patterns:
         - include\(
+        - include_once\(
         - require\(
+        - require_once\(
         - fopen\(
-        - file_get_contents
-        - file_put_contents
+        - file_get_contents\(
+        - file_put_contents\(
+        - readfile\(
+        - move_uploaded_file\(
+        - copy\(
+        - rename\(
       category: file_operation
       severity: MEDIUM
       profiles:
@@ -79,7 +135,7 @@ taintTracking:
     - id: SEC-DES-002
       name: Deserialization
       patterns:
-        - unserialize(
+        - unserialize\(
       category: deserialization
       severity: HIGH
       profiles:
@@ -97,6 +153,7 @@ taintTracking:
         - simplexml_load_string
         - simplexml_load_file
         - DOMDocument.loadXML
+        - XMLReader::open
       category: xxe
       severity: HIGH
       profiles:
@@ -108,6 +165,119 @@ taintTracking:
         owasp:
           - A03:2021
       doc_url: https://docs.gbt-codeagent.com/rules/xxe
+    - id: SEC-SSRF-001
+      name: SSRF (Server Side Request Forgery)
+      patterns:
+        - curl_init\(
+        - curl_setopt.*CURLOPT_URL
+        - get_headers\(
+        - file_get_contents\(https?://
+        - fsockopen\(
+      category: ssrf
+      severity: HIGH
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-918
+        owasp:
+          - A10:2021
+      _quickScan: true
+      _vulnType: SSRF
+      _cwe: CWE-918
+      _chineseSeverity: 高危
+    - id: SEC-XSS-001
+      name: XSS (Cross Site Scripting)
+      patterns:
+        - echo\s*\$
+        - print\s*\$
+        - <?=
+        - <?php echo
+      category: xss
+      severity: MEDIUM
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-79
+        owasp:
+          - A03:2021
+      _quickScan: true
+      _vulnType: XSS
+      _cwe: CWE-79
+      _chineseSeverity: 中危
+    - id: SEC-REDIR-001
+      name: Open Redirect
+      patterns:
+        - header\s*\(\s*['"]Location
+      category: open_redirect
+      severity: LOW
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-601
+      _quickScan: true
+      _vulnType: OPEN_REDIRECT
+      _cwe: CWE-601
+      _chineseSeverity: 低危
+    - id: SEC-CRLF-001
+      name: CRLF Injection
+      patterns:
+        - header\s*\(
+        - setcookie\s*\(
+      category: crlf
+      severity: MEDIUM
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-93
+      _quickScan: true
+      _vulnType: CRLF_INJECTION
+      _cwe: CWE-93
+      _chineseSeverity: 中危
+    - id: SEC-LDAP-001
+      name: LDAP Injection
+      patterns:
+        - ldap_search\(
+        - ldap_read\(
+        - ldap_list\(
+      category: ldap_injection
+      severity: HIGH
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-90
+      _quickScan: true
+      _vulnType: LDAP_INJECTION
+      _cwe: CWE-90
+      _chineseSeverity: 高危
+    - id: SEC-ARCHIVE-001
+      name: Archive Extract (Zip Slip)
+      patterns:
+        - ZipArchive::extractTo
+        - ZipArchive->extractTo
+        - PharData::extractTo
+        - PharData->extractTo
+      category: archive
+      severity: HIGH
+      profiles:
+        - security
+        - default
+      guidelines:
+        cwe:
+          - CWE-22
+      _quickScan: true
+      _vulnType: ARCHIVE_EXTRACT
+      _cwe: CWE-22
+      _chineseSeverity: 高危
     - id: QS-PHP-816
       name: COMMAND INJECTION
       patterns:

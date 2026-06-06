@@ -40,6 +40,14 @@ from src.knowledge.vuln_profiles import VULN_PROFILES
 from src.services.code_comment_parser import CodeCommentParser
 
 
+# ---------- 动态线程池大小计算 ----------
+def _get_optimal_workers(max_limit: int = 8) -> int:
+    """根据 CPU 核心数动态计算合适的线程池大小（I/O 密集型任务）。"""
+    cpu_count = os.cpu_count() or 4
+    # I/O 密集型：CPU * 2，最多不超过 max_limit
+    return min(cpu_count * 2, max_limit)
+
+
 # === Sink 元数据（证据点定义）===
 
 SINK_METADATA: Dict[str, Dict[str, Any]] = {
@@ -801,8 +809,9 @@ class QuickScanService:
                     except Exception:
                         pass
         else:
-            # 大项目并行扫描
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            # 大项目并行扫描（根据 CPU 核心数动态调整）
+            max_workers = _get_optimal_workers(max_limit=8)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
                     executor.submit(self.scan_file, abs_path, project_root): abs_path
                     for abs_path in supported_files

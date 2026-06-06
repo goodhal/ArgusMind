@@ -1,0 +1,147 @@
+# Framework Model: Flask (Python Web Framework)
+# Source: ArgusMind 已有参考 + CodeQL 思想
+#
+# Description: 定义 Flask 框架的安全 sink、source 和数据流转规则
+#
+# CWE 覆盖:
+#   - CWE-022 (路径遍历)
+#   - CWE-078 (命令注入)
+#   - CWE-079 (XSS)
+#   - CWE-089 (SQL 注入)
+#   - CWE-502 (不安全的反序列化)
+#   - CWE-601 (URL 重定向)
+
+metadata:
+  name: Flask
+  description: Flask Web 框架的安全规则
+  source: ArgusMind + CodeQL
+  version: 1.0
+  security-severity: high
+  precision: high
+  tags:
+    - security
+    - python
+    - flask
+    - web
+
+sources:
+  - category: user_input
+    description: Flask 的各种请求输入
+    functions:
+      - name: flask.request.args
+        note: 查询参数
+        taint: true
+      - name: flask.request.form
+        note: 表单数据
+        taint: true
+      - name: flask.request.values
+        note: 查询和表单合并
+        taint: true
+      - name: flask.request.cookies
+        note: Cookie
+        taint: true
+      - name: flask.request.headers
+        note: HTTP 头
+        taint: true
+      - name: flask.request.data
+        note: 原始请求数据
+        taint: true
+      - name: flask.request.get_data
+        note: 获取请求数据
+        taint: true
+      - name: flask.request.get_json
+        note: 获取 JSON 数据
+        taint: true
+      - name: flask.request.json
+        note: JSON 数据
+        taint: true
+      - name: flask.request.files
+        note: 上传文件
+        taint: true
+      - name: flask.request.stream
+        note: 请求流
+        taint: true
+      - name: flask.request.view_args
+        note: 视图参数（路由参数）
+        taint: true
+      - name: flask.request.endpoint
+        note: 请求端点
+        taint: true
+      - name: flask.request.url
+        note: 请求 URL
+        taint: true
+      - name: flask.request.base_url
+        note: 基础 URL
+        taint: true
+      - name: flask.request.url_root
+        note: URL 根
+        taint: true
+      - name: flask.request.host_url
+        note: 主机 URL
+        taint: true
+      - name: flask.request.host
+        note: 主机名
+        taint: true
+      - name: flask.request.remote_addr
+        note: 远程地址
+        taint: true
+      - name: flask.request.remote_user
+        note: 远程用户
+        taint: true
+
+sinks:
+  - category: path_injection
+    description: 路径遍历风险
+    functions:
+      - name: flask.send_file
+        note: 发送文件
+        severity: high
+        cwe: ["CWE-022"]
+      - name: flask.send_from_directory
+        note: 从目录发送文件
+        severity: high
+        cwe: ["CWE-022"]
+      - name: os.path.join
+        note: 路径拼接 - 当包含用户输入时
+        severity: medium
+        cwe: ["CWE-022"]
+
+  - category: xss
+    description: XSS 风险
+    functions:
+      - name: flask.render_template
+        note: 渲染模板 - 需要防止模板注入
+        severity: high
+        cwe: ["CWE-079"]
+      - name: flask.render_template_string
+        note: 渲染模板字符串 - 高风险
+        severity: critical
+        cwe: ["CWE-079", "CWE-094"]
+      - name: flask.Markup
+        note: 标记为安全 - 需谨慎使用
+        severity: medium
+        cwe: ["CWE-079"]
+      - name: flask.escape
+        note: 转义 - 应该被正确使用
+        severity: info
+        cwe: []
+
+  - category: url_redirection
+    description: URL 重定向风险
+    functions:
+      - name: flask.redirect
+        note: URL 重定向
+        severity: medium
+        cwe: ["CWE-601"]
+      - name: flask.url_for
+        note: 生成 URL - 使用外部参数时需谨慎
+        severity: medium
+        cwe: ["CWE-601"]
+
+data_flow:
+  - source: flask.request.*
+    sink: flask.*
+    note: 所有请求输入都可能流向各种 Flask 函数
+  - source: flask.request.*
+    sink: subprocess.*
+    note: 请求输入不应直接传给子进程

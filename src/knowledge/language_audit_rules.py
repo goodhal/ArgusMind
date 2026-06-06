@@ -227,3 +227,29 @@ LANGUAGE_AUDIT_RULES: Dict[str, Dict] = {
         },
     },
 }
+
+# 代码质量规则（从 open-code-review 借鉴）
+CODE_QUALITY_RULES = {
+    "dead_code": {
+        "description": "Dead Code Detection",
+        "checks": [
+            "Unreachable code (condition always false, code after return/throw)",
+            "Unused variables (declared but never read)",
+            "Large blocks of commented-out code (no preservation intent)",
+            "Empty loop bodies",
+        ],
+        "severity": "medium",
+    },
+    "spelling": {
+        "description": "Spelling Errors",
+        "checks": [
+            "Spelling errors in variable/function/class names at declaration sites",
+            "Spelling errors in log messages or exception messages",
+            "Spelling errors in user-visible text",
+        ],
+        "severity": "low",
+    },
+}
+
+# 代码质量规则文件路径
+CODE_QUALITY_RULES_PATH = "src/knowledge/config_reference/rules/code_quality/"

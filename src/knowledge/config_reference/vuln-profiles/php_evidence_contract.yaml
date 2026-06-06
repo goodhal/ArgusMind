@@ -1,0 +1,114 @@
+php_evidence_contract:
+  description: PHP安全审计 - 基于证据契约的审计方法
+  cwe: CWE-913
+  languages:
+    php:
+      principles:
+        - name: 证据契约
+          description: 所有审计结论必须有具体的证据点支持
+          evidence:
+            - sink_execution_point: 敏感操作执行点
+            - data_flow_trace: 数据流追踪证据
+            - controllability_matrix: 输入可控性证明
+            - authentication_check: 认证检查证据
+
+      sink_categories:
+        - category: 命令执行
+          sinks:
+            - pattern: system\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+            - pattern: exec\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+            - pattern: shell_exec\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+            - pattern: passthru\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+            - pattern: popen\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+            - pattern: proc_open\(
+              evidence_required:
+                - EVID_CMD_EXEC_POINT
+                - EVID_CMD_USER_PARAM_TO_CMD_FRAGMENT
+        - category: SQL执行
+          sinks:
+            - pattern: mysql_query\(
+              evidence_required:
+                - EVID_SQL_EXEC_POINT
+                - EVID_SQL_USER_PARAM_TO_SQL_FRAGMENT
+            - pattern: mysqli_query\(
+              evidence_required:
+                - EVID_SQL_EXEC_POINT
+                - EVID_SQL_USER_PARAM_TO_SQL_FRAGMENT
+            - pattern: \$pdo->query\(
+              evidence_required:
+                - EVID_SQL_EXEC_POINT
+                - EVID_SQL_USER_PARAM_TO_SQL_FRAGMENT
+        - category: 文件操作
+          sinks:
+            - pattern: include\(
+              evidence_required:
+                - EVID_FILE_INCLUDE_REQUIRE_EXEC_BOUNDARY
+            - pattern: require\(
+              evidence_required:
+                - EVID_FILE_INCLUDE_REQUIRE_EXEC_BOUNDARY
+            - pattern: include_once\(
+              evidence_required:
+                - EVID_FILE_INCLUDE_REQUIRE_EXEC_BOUNDARY
+            - pattern: require_once\(
+              evidence_required:
+                - EVID_FILE_INCLUDE_REQUIRE_EXEC_BOUNDARY
+            - pattern: file_get_contents\(
+              evidence_required:
+                - EVID_FILE_RESOLVED_TARGET
+            - pattern: file_put_contents\(
+              evidence_required:
+                - EVID_WRITE_WRITE_CALLSITE
+                - EVID_WRITE_DESTPATH_RESOLVED_TARGET
+        - category: 反序列化
+          sinks:
+            - pattern: unserialize\(
+              evidence_required:
+                - EVID_DESER_CALLSITE
+                - EVID_DESER_INPUT_SOURCE
+                - EVID_DESER_OBJECT_TYPE_MAGIC_TRIGGER_CHAIN
+
+      remediation_guidance:
+        - issue_type: 命令注入
+          fix_examples:
+            - 使用 escapeshellarg/escapeshellcmd
+            - 使用 proc_open 配合白名单
+            - 避免直接拼接用户输入到命令
+        - issue_type: SQL注入
+          fix_examples:
+            - 使用 PDO 预处理语句
+            - 使用 mysqli 预处理语句
+            - 使用 ORM 的参数绑定
+        - issue_type: 文件包含
+          fix_examples:
+            - 使用白名单验证文件名
+            - 限制在固定目录下
+            - 使用 realpath 验证
+        - issue_type: 反序列化
+          fix_examples:
+            - 使用 json_encode/json_decode 替代
+            - 使用 safedata 格式
+            - 添加 allowed_classes 限制
+
+      audit_workflow:
+        step_1_route_mapping: 识别所有可访问的路由和入口点
+        step_2_sink_identification: 定位所有潜在的风险操作点
+        step_3_taint_tracing: 追踪用户输入到 sink 的数据流
+        step_4_controllability_analysis: 分析用户对每个参数的可控程度
+        step_5_evidence_collection: 收集所有必需的证据点
+        step_6_severity_assessment: 使用三维评分模型评估严重程度
+        step_7_report_generation: 生成带证据链的审计报告
