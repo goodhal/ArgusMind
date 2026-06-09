@@ -28,3 +28,15 @@ export async function downloadHtmlReportApiReportsTaskIdHtmlGet(
     ...(options || {}),
   });
 }
+
+/** Regenerate HTML Report POST /api/reports/${param0}/regenerate */
+export async function regenerateHtmlReportApiReportsTaskIdRegeneratePost(
+  params: API.getReportApiReportsTaskIdGetParams,
+  options?: { [key: string]: any }
+) {
+  const { task_id: param0 } = params;
+  return request<API.OkResponseDict_>(`/api/reports/${param0}/regenerate`, {
+    method: "POST",
+    ...(options || {}),
+  });
+}

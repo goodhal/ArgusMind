@@ -35,15 +35,19 @@ _CONTEXT_LINES = 15
 class QuickScanVerifier:
     """使用 LLM 验证快速扫描结果。"""
 
-    def __init__(self, llm: LLMClient, project_path: str = "") -> None:
+    def __init__(self, llm: LLMClient, project_path: str = "", task_id: str = "") -> None:
         self._llm = llm
         self._project_path = project_path
+        self._task_id = task_id
         self._stats: Dict[str, int] = {
             "total": 0,
             "confirmed": 0,
             "false_positive": 0,
             "need_review": 0,
             "error": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
         }
         self._lock = threading.Lock()
 
@@ -82,13 +86,38 @@ class QuickScanVerifier:
             verified = self._verify_batches_parallel(batches, project_info, max_workers)
 
         logger.info(
-            "QuickScanVerifier 完成: total=%d confirmed=%d false_positive=%d need_review=%d error=%d",
+            "QuickScanVerifier 完成: total=%d confirmed=%d false_positive=%d need_review=%d error=%d prompt_tokens=%d completion_tokens=%d cached_tokens=%d",
             self._stats["total"],
             self._stats["confirmed"],
             self._stats["false_positive"],
             self._stats["need_review"],
             self._stats["error"],
+            self._stats["prompt_tokens"],
+            self._stats["completion_tokens"],
+            self._stats["cached_tokens"],
         )
+        # 上报 token 用量到 token_ledger
+        if self._task_id and (self._stats["prompt_tokens"] or self._stats["completion_tokens"]):
+            try:
+                from src.services.token_service import report_token_usage
+                report_token_usage(
+                    task_id=self._task_id,
+                    llm_input=self._stats["prompt_tokens"],
+                    llm_output=self._stats["completion_tokens"],
+                    note="llm_verification",
+                )
+                # 上报 LLM prompt cache 命中统计
+                cached = self._stats["cached_tokens"]
+                total_prompt = self._stats["prompt_tokens"]
+                if total_prompt > 0:
+                    report_token_usage(
+                        task_id=self._task_id,
+                        llm_input=cached,
+                        llm_output=total_prompt - cached,
+                        note="cache_stats:llm_verification",
+                    )
+            except Exception:
+                pass
         return verified
 
     def _verify_batches_parallel(
@@ -138,6 +167,11 @@ class QuickScanVerifier:
         try:
             resp = self._llm.call(messages, temperature=0.1)
             result = parse_json(resp.content, default={})
+            # 累计 token 用量
+            with self._lock:
+                self._stats["prompt_tokens"] += resp.prompt_tokens
+                self._stats["completion_tokens"] += resp.completion_tokens
+                self._stats["cached_tokens"] += resp.cached_tokens
         except Exception as e:
             logger.warning("QuickScanVerifier LLM 调用失败: %s", e)
             # LLM 调用失败时，所有 finding 标记为 need_review

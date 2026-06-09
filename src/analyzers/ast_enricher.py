@@ -947,15 +947,26 @@ class ASTEnricherService:
         vuln_type: str,
     ) -> Optional[Dict[str, Any]]:
         """通用分析（兜底）。"""
+        has_input = self._check_patterns(context_lines, _USER_INPUT_PATTERNS)
+        has_validation = self._check_patterns(context_lines, _VALIDATION_PATTERNS)
+
+        if has_input and not has_validation:
+            rec = "检测到用户输入进入存在风险的代码路径且缺乏有效验证机制，建议补充输入校验和白名单过滤，确认输入来源和攻击面。"
+        elif has_input and has_validation:
+            rec = "检测到用户输入且存在部分校验机制，建议人工评估输入验证是否覆盖所有攻击面（如特殊字符、边界值、编码绕过等）。"
+        else:
+            rec = "该代码点存在潜在安全风险，未检测到直接的对外部用户输入的引用，建议结合业务逻辑确认数据来源的可信度。"
+        rec += "如果确认无法被外部访问，可标记为误报。"
+
         return {
             "sink": "generic_risk",
             "sink_severity": "medium",
             "sink_desc": "潜在安全风险",
             "vuln_type": vuln_type,
             "context_lines": self._format_context_lines(context_lines, max(0, line_num - 9)),
-            "has_user_input": self._check_patterns(context_lines, _USER_INPUT_PATTERNS),
-            "has_validation": self._check_patterns(context_lines, _VALIDATION_PATTERNS),
-            "recommendation": "建议人工复核该代码点，确认是否构成实际安全风险",
+            "has_user_input": has_input,
+            "has_validation": has_validation,
+            "recommendation": rec,
         }
 
     # ---------- SQL 特化检测 ----------

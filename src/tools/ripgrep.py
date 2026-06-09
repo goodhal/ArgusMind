@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -26,6 +27,8 @@ def _coerce_base(base: Optional[Union[str, Path]]) -> Optional[Path]:
         return None
     p = Path(base) if isinstance(base, str) else base
     return p.expanduser().resolve(strict=False)
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_globs(glob: Optional[Union[str, List[str]]]) -> List[str]:
@@ -306,44 +309,14 @@ class RipgrepSearchTool(BaseTool):
                 meta={"root": str(path)},
             )
 
-        # 简单的正则表达式语法校验
+        # 简单的正则表达式语法校验：仅检查括号匹配，然后交由 Python re 做基本验证
         try:
-            # 检查是否包含无效的正则表达式语法
-            # 检查常见的语法错误
-            invalid_patterns = [
-                r"\{\d*,(\s|$)",  # 重复操作符后缺少表达式（如 {2,} 后面直接结束）
-                r"\{\s*,",  # { 后面直接是逗号
-                r"\{\,",    # { 和 , 之间没有数字
-                r"\*\*",    # 连续的 *
-                r"\+\+",    # 连续的 +
-                r"\?\?",    # 连续的 ?
-                r"\{\{",    # 连续的 {
-                r"\}\}",    # 连续的 }
-                r"\(\(",    # 连续的 (
-                r"\)\)",    # 连续的 )
-                r"\[\[",    # 连续的 [
-                r"\]\]",    # 连续的 ]
-                r"\|\|",    # 连续的 |
-                r"\(\|",    # (| 无效组合
-                r"\|\)",    # |) 无效组合
-                r"\(\)",    # 空的捕获组
-                r"\[\]",    # 空的字符类
-                r"\{\}",    # 空的重复操作符
-                r"\$\^",    # $^ 无效组合
-                r"\^\$",    # ^$ 无效组合
-            ]
-            for invalid in invalid_patterns:
-                if re.search(invalid, pattern):
-                    return ToolResult(
-                        success=False,
-                        error=f"正则表达式包含无效语法: {pattern}",
-                        error_code=ERROR_CODE_INVALID_ARGUMENT,
-                        meta={"root": str(path)},
-                    )
-            
+            # 先移除转义字符（如 \(、\)、\[、\{ 等），以免转义字面量干扰计数
+            _bare = re.sub(r'\\(.)', '', pattern)
+
             # 检查未闭合的括号
-            open_parens = pattern.count("(")
-            close_parens = pattern.count(")")
+            open_parens = _bare.count("(")
+            close_parens = _bare.count(")")
             if open_parens != close_parens:
                 return ToolResult(
                     success=False,
@@ -351,10 +324,10 @@ class RipgrepSearchTool(BaseTool):
                     error_code=ERROR_CODE_INVALID_ARGUMENT,
                     meta={"root": str(path)},
                 )
-            
+
             # 检查未闭合的方括号
-            open_brackets = pattern.count("[")
-            close_brackets = pattern.count("]")
+            open_brackets = _bare.count("[")
+            close_brackets = _bare.count("]")
             if open_brackets != close_brackets:
                 return ToolResult(
                     success=False,
@@ -362,10 +335,10 @@ class RipgrepSearchTool(BaseTool):
                     error_code=ERROR_CODE_INVALID_ARGUMENT,
                     meta={"root": str(path)},
                 )
-            
+
             # 检查未闭合的花括号
-            open_braces = pattern.count("{")
-            close_braces = pattern.count("}")
+            open_braces = _bare.count("{")
+            close_braces = _bare.count("}")
             if open_braces != close_braces:
                 return ToolResult(
                     success=False,
@@ -373,19 +346,14 @@ class RipgrepSearchTool(BaseTool):
                     error_code=ERROR_CODE_INVALID_ARGUMENT,
                     meta={"root": str(path)},
                 )
-            
+
             # 尝试用 Python 正则解析器验证基本语法
+            # 注意：Python re 与 Rust regex 语法有差异，此校验仅为兜底，
+            # 即便失败也仍交由 ripgrep 自身处理
             re.compile(pattern)
         except re.error as e:
-            return ToolResult(
-                success=False,
-                error=f"正则表达式语法错误: {e}（模式: {pattern}）",
-                error_code=ERROR_CODE_INVALID_ARGUMENT,
-                meta={"root": str(path)},
-            )
-        except Exception:
-            # 校验过程中的其他异常忽略，让 ripgrep 自己处理
-            pass
+            # Python re 校验失败时仅记录，不阻断——让 ripgrep 自身做最终校验
+            logger.debug("正则语法 Python 校验不通过（将交由 ripgrep 处理）: %s — %s", pattern, e)
 
         globs = _normalize_globs(glob)
         argv: List[str] = ["--json", "--hidden", "--glob=!.git/*"]

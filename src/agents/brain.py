@@ -199,7 +199,7 @@ class Brain:
                 len(resp.content),
                 resp.content[:300],
             )
-        return parsed, resp.prompt_tokens, resp.completion_tokens
+        return parsed, resp.prompt_tokens, resp.completion_tokens, resp.cached_tokens
 
     def run_tool(
         self,

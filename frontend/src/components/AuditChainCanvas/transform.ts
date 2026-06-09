@@ -54,6 +54,17 @@ function pickTitle(node: AuditChainRawNode): string {
 function pickSubtitle(node: AuditChainRawNode): string | undefined {
   const p = node.props || {};
   const label = asNodeLabel(node.labels);
+
+  // 时间戳格式化（只显示时分秒）
+  const fmtTime = (ts: string | undefined) => {
+    if (!ts) return null;
+    try {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return null;
+      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+    } catch { return null; }
+  };
+
   switch (label) {
     case 'SinkFlowNode':
     case 'ChainNode':
@@ -70,6 +81,16 @@ function pickSubtitle(node: AuditChainRawNode): string | undefined {
       return undefined;
     case 'Language':
       return `优先级 ${p.level ?? '-'}`;
+    case 'AuditStage': {
+      // 显示状态 + 时间范围
+      const status = p.status ?? '';
+      const start = fmtTime(p.created_at);
+      const end = fmtTime(p.end_time);
+      const statusColor = status === 'completed' ? '✓' : status === 'running' ? '⟳' : status === 'failed' ? '✗' : '○';
+      if (start && end) return `${statusColor} ${start} → ${end}`;
+      if (start) return `${statusColor} ${start}`;
+      return status ? `${statusColor} ${status}` : undefined;
+    }
     case 'AuditInfo': {
       const kind = p.kind ?? p.info_type ?? p.category;
       const src = p.source ?? p.origin;

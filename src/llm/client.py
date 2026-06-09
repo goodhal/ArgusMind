@@ -70,6 +70,9 @@ class LLMResponse:
     total_tokens: int = 0
     """总 token 数（prompt_tokens + completion_tokens）"""
 
+    cached_tokens: int = 0
+    """命中 prompt cache 的 token 数"""
+
     raw: object | None = None
     """底层 LLM 原始响应对象（用于调试/透传）"""
 
@@ -141,15 +144,19 @@ class LLMClient:
                 return True
         return False
 
-    def _parse_usage(self, response) -> tuple[int, int, int]:
-        """从 LiteLLM 响应中解析 usage，返回 (prompt_tokens, completion_tokens, total_tokens)"""
-        prompt_tokens = completion_tokens = total_tokens = 0
+    def _parse_usage(self, response) -> tuple[int, int, int, int]:
+        """从 LiteLLM 响应中解析 usage，返回 (prompt_tokens, completion_tokens, total_tokens, cached_tokens)"""
+        prompt_tokens = completion_tokens = total_tokens = cached_tokens = 0
         if getattr(response, "usage", None):
             u = response.usage
             prompt_tokens = getattr(u, "prompt_tokens", 0) or 0
             completion_tokens = getattr(u, "completion_tokens", 0) or 0
             total_tokens = getattr(u, "total_tokens", 0) or (prompt_tokens + completion_tokens)
-        return (prompt_tokens, completion_tokens, total_tokens)
+            # 提取 prompt caching 命中的 token 数
+            prompt_details = getattr(u, "prompt_tokens_details", None)
+            if prompt_details:
+                cached_tokens = getattr(prompt_details, "cached_tokens", 0) or 0
+        return (prompt_tokens, completion_tokens, total_tokens, cached_tokens)
 
     def call(
             self,
@@ -235,12 +242,13 @@ class LLMClient:
                     continue
                 raise last_exc
 
-            prompt_tokens, completion_tokens, total_tokens = self._parse_usage(response)
+            prompt_tokens, completion_tokens, total_tokens, cached_tokens = self._parse_usage(response)
             return LLMResponse(
                 content=content,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
+                cached_tokens=cached_tokens,
                 raw=response,
             )
 

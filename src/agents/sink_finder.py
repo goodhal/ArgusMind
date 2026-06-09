@@ -611,6 +611,15 @@ class SinkFinder(BaseAgent):
 
         # 提前终止：连续无发现轮次阈值
         self._early_stop_consecutive_empty = 4  # 连续4轮工具调用无实质发现则提前退出
+        
+        # 集成优化器
+        from src.services.llm_optimizer import get_optimizer, Limiter
+        from src.services.context_compressor import ContextCompressor
+        self._optimizer = get_optimizer()
+        self._optimizer.load_cache()
+        self._limiter = Limiter(max_concurrent=3)
+        # 延迟初始化上下文压缩器，避免在 brain 为 None 时出错
+        self._context_compressor = None
 
     @staticmethod
     def _is_tool_result_substantive(tool_result: Any, tool_name: str) -> bool:
@@ -996,8 +1005,18 @@ class SinkFinder(BaseAgent):
                 next_action = (res or {}).get("next_action", {}) or {}
                 action_type = next_action.get("type", "")
 
-                # ---- 工具调用 ----
-                if action_type == "tool_call":
+                # ---- 工具调用（兼容 LLM 将工具名误设为 action_type） ----
+                if action_type == "tool_call" or action_type in {"ripgrep_search", "read_file", "read_lines",
+                        "ripgrep_files", "list_files", "code_search", "class_hierarchy", "remote_repo",
+                        "code_agent", "ripgrep", "search", "grep", "read", "cat", "list", "ls",
+                        "list_directory", "dir"}:
+                    if action_type != "tool_call":
+                        self._publish_log(
+                            "INFO",
+                            f"[SinkFinder] 自动修正 action_type={action_type!r} → tool_call (tool_name={action_type!r})",
+                        )
+                        next_action["type"] = "tool_call"
+                        next_action.setdefault("tool_name", action_type)
                     tool_name = next_action.get("tool_name", "")
                     if not tool_name:
                         sink_finder_span.add_llm_tokens(input_tokens, output_tokens)
@@ -1019,7 +1038,8 @@ class SinkFinder(BaseAgent):
                         reason=f"调用 {tool_name} 工具",
                         tool_arguments=next_action.get('arguments', {}) or {},
                     )
-                    tool_result = self._execute_tool_call(next_action, msg, tool_span)
+                    # 使用并发限制器执行工具调用
+                    tool_result = self._limiter(self._execute_tool_call, next_action, msg, tool_span)
                     tool_span.set_output(json.dumps(tool_result, ensure_ascii=False, default=str))
                     tool_span.add_llm_tokens(input_tokens, output_tokens)
                     if tool_result is None:
@@ -1163,6 +1183,7 @@ class SinkFinder(BaseAgent):
             f"[SinkFinder] 已落库 Neo4j 并标记完成 | vul_node_id={vul_node_id}",
         )
         mark_risk_category_sink_finder_completed(vul_node_id)
+        self._report_cache_stats(self._brain.task_id)
         sink_finder_span.finish()
         return {"nodes": sink_nodes, **flow}
 
@@ -1304,6 +1325,20 @@ class SinkRefineAgent(BaseAgent):
             next_action = (envelope.get("next_action") or {}) if isinstance(envelope, dict) else {}
             action = (next_action or {}).get("type", "")
 
+            # 兼容 LLM 将工具名误设为 action_type
+            _known_tools_for_fallback = {"ripgrep_search", "read_file", "read_lines",
+                "ripgrep_files", "list_files", "code_search", "class_hierarchy", "remote_repo",
+                "code_agent", "ripgrep", "search", "grep", "read", "cat", "list", "ls",
+                "list_directory", "dir"}
+            if action != "tool_call" and action != "final" and action in _known_tools_for_fallback:
+                self._publish_log(
+                    "INFO",
+                    f"[SinkRefineAgent] 自动修正 action_type={action!r} → tool_call",
+                )
+                next_action["type"] = "tool_call"
+                next_action.setdefault("tool_name", action)
+                action = "tool_call"
+
             if action == "tool_call":
                 tool_name = (next_action or {}).get("tool_name", "") or ""
                 if tool_name == "":
@@ -1338,7 +1373,8 @@ class SinkRefineAgent(BaseAgent):
                     tool_arguments=arguments,
                 )
                 conversation.append({"role": "assistant", "content": content})
-                tool_result = self._execute_tool_call(
+                # 使用并发限制器执行工具调用
+                tool_result = self._limiter(self._execute_tool_call,
                     {"tool_name": tool_name, "arguments": arguments},
                     conversation,
                     tool_span,
@@ -1426,6 +1462,7 @@ class SinkRefineAgent(BaseAgent):
                     reason=f"{language} 语言的 {vul_name} 类型sink点经过处理剩余{len(normalized)}条",
                 )
                 _info_span.finish()
+                self._report_cache_stats(self._brain.task_id)
                 sink_refine_span.finish()
                 return normalized
 
@@ -1447,5 +1484,6 @@ class SinkRefineAgent(BaseAgent):
             "WARNING",
             f"[SinkRefineAgent] 已达最大轮次 {self.max_steps}，回退 fallback | count={len(out)}",
         )
+        self._report_cache_stats(self._brain.task_id)
         sink_refine_span.finish()
         return out

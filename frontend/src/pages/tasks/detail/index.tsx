@@ -40,6 +40,7 @@ import {
 import {
   getReportApiReportsTaskIdGet,
   downloadHtmlReportApiReportsTaskIdHtmlGet,
+  regenerateHtmlReportApiReportsTaskIdRegeneratePost,
 } from '@/services/swagger/reports';
 import type { AuditSessionDetailDTO } from '@/types/auditSessionDetail';
 import {
@@ -1013,6 +1014,50 @@ const TaskDetailPage: React.FC = () => {
             onClick={() => handleViewHtmlReport()}
           >
             查看报告
+          </Button>
+        ) : null,
+        detail?.session.status === 'completed' ? (
+          <Button
+            key="regenerate-report"
+            icon={<LinkOutlined />}
+            onClick={async () => {
+              if (!taskId) return;
+              try {
+                await regenerateHtmlReportApiReportsTaskIdRegeneratePost({ task_id: taskId });
+                message.success('报告已重新生成');
+                // 刷新报告数据
+                const res = await getReportApiReportsTaskIdGet({ task_id: taskId });
+                if (res?.success && res.data) {
+                  const d = res.data as Record<string, any>;
+                  const qs = d.quick_scan ?? {};
+                  const cov = d.coverage ?? {};
+                  const hr = d.html_report ?? {};
+                  const sev = d.summary?.severity ?? {};
+                  setQuickScanData({
+                    completed: Boolean(qs.completed),
+                    findingsCount: Number(qs.findings_count ?? 0),
+                    reason: String(qs.reason ?? ''),
+                    coverage: {
+                      coverage_rate: Number(cov.coverage_rate ?? 0),
+                      reviewed_files: Number(cov.reviewed_files ?? 0),
+                      total_files: Number(cov.total_files ?? 0),
+                    },
+                    htmlReportAvailable: Boolean(hr.available),
+                    severityCounts: {
+                      critical: Number(sev.C ?? 0),
+                      high: Number(sev.H ?? 0),
+                      medium: Number(sev.M ?? 0),
+                      low: Number(sev.L ?? 0),
+                    },
+                  });
+                }
+                void load();
+              } catch {
+                message.error('重新生成失败');
+              }
+            }}
+          >
+            重新生成报告
           </Button>
         ) : null,
         <Button key="tasks" onClick={() => history.push('/tasks')}>

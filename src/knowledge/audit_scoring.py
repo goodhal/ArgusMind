@@ -70,13 +70,13 @@ def calculate_audit_score(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         weight = SEVERITY_WEIGHTS.get(level, 0)
         total_deduction += weight * count
 
-    # 评分 = max(0, 100 - deduction)，但使用对数衰减避免大项目评分过低
+    # 评分 = 100 × (1 - deduction / (deduction + k))
+    # 使用双曲线衰减：扣分越大衰减越慢，永远不会降到 0，对大项目有区分度
     if total_deduction <= 0:
         score = 100
     else:
-        # 使用衰减公式：score = 100 * exp(-deduction / 30)
-        import math
-        score = max(0, min(100, round(100 * math.exp(-total_deduction / 30), 1)))
+        k = 50  # 半衰常数：扣分=k 时评分=50
+        score = max(0, min(100, round(100 * (1 - total_deduction / (total_deduction + k)), 1)))
 
     # 评级
     grade = "D"

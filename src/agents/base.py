@@ -35,6 +35,7 @@ class BaseAgent:
         self._tool_cache: OrderedDict[str, Any] = OrderedDict()
         self._tool_cache_hits = 0
         self._tool_cache_misses = 0
+        self._llm_cached_tokens = 0
 
     @property
     def _agent_tag(self) -> str:
@@ -74,11 +75,14 @@ class BaseAgent:
         for attempt in range(self.max_retries):
             ensure_task_running(task_id or "")
             try:
-                result, input_token, output_token = self._brain.ask(conversation)
+                result, input_token, output_token, cached_token = self._brain.ask(conversation)
                 # 如果 LLM 未返回 token 用量，用字符数估计作为兜底
                 if input_token == 0 and output_token == 0 and isinstance(result, dict):
                     input_token = sum(len(m.get("content", "")) for m in conversation) // 4
                     output_token = max(len(json.dumps(result, ensure_ascii=False)) // 4, 1)
+                # 累计 LLM prompt cache 命中 token
+                if cached_token:
+                    self._llm_cached_tokens += cached_token
                 # 直接上报 token（绕开 EventSpan/TicketEvent 链路，保证落库）
                 if task_id and (input_token or output_token):
                     try:
@@ -175,15 +179,20 @@ class BaseAgent:
         return count
 
     def _report_cache_stats(self, task_id: str) -> None:
-        """将当前 Agent 的 tool cache 命中率写入 token_ledger（note='cache_stats'，覆盖写入）。"""
+        """将当前 Agent 的 cache 命中率写入 token_ledger（note='cache_stats'）。
+        合并 tool cache 和 LLM prompt cache 的命中统计。
+        """
         if not task_id:
             return
         try:
             from src.services.token_service import report_token_usage
+            # 合并 tool cache hits/misses 和 LLM prompt cache cached_tokens
+            total_hits = self._tool_cache_hits + self._llm_cached_tokens
+            total_misses = self._tool_cache_misses
             report_token_usage(
                 task_id=task_id,
-                llm_input=self._tool_cache_hits,
-                llm_output=self._tool_cache_misses,
+                llm_input=total_hits,
+                llm_output=total_misses,
                 code_agent_input=0,
                 code_agent_output=0,
                 note=f"cache_stats:{self._agent_tag}",
@@ -228,6 +237,8 @@ class BaseAgent:
             "cat": "read_file",
             "list": "list_files",
             "ls": "list_files",
+            "list_directory": "list_files",
+            "dir": "list_files",
         }
         if tool_name in _tool_aliases:
             original_name = tool_name
@@ -252,8 +263,8 @@ class BaseAgent:
 
         # 定义工具必需参数的校验规则
         _required_params = {
-            "read_file": ["file_path", "path", "filepath"],
-            "read_lines": ["file_path", "path", "filepath"],
+            "read_file": ["file_path", "path", "filepath", "file"],
+            "read_lines": ["file_path", "path", "filepath", "file"],
             "ripgrep_search": ["pattern"],
             "ripgrep": ["pattern"],
         }

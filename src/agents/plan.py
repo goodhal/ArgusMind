@@ -73,12 +73,31 @@ class Plan(BaseAgent):
                     })
                     continue
                 self._brain.plan = final_output
+                self._report_cache_stats(self._brain.task_id)
                 plan_span.finish()
                 self._publish_log("INFO", f"[Plan] 审计计划生成完成 (轮 {round_num})")
                 return final_output
 
+            # 兼容 LLM 将工具名误设为 action_type
+            _known_tools_fallback = {"ripgrep_search", "read_file", "read_lines",
+                "ripgrep_files", "list_files", "code_search", "class_hierarchy", "remote_repo",
+                "code_agent", "ripgrep", "search", "grep", "read", "cat", "list", "ls",
+                "gitnexus_context", "list_directory", "dir"}
             if action_type == "tool_call":
                 tool_name = next_action.get("tool_name", "") or ""
+            elif action_type in _known_tools_fallback:
+                self._publish_log(
+                    "INFO",
+                    f"[Plan] 自动修正 action_type={action_type!r} → tool_call (tool_name={action_type!r})",
+                )
+                tool_name = action_type
+                next_action["type"] = "tool_call"
+                next_action.setdefault("tool_name", action_type)
+                action_type = "tool_call"
+            else:
+                action_type = action_type  # fall through to the invalid handler below
+
+            if action_type == "tool_call":
                 self._publish_log(
                     "INFO",
                     f"[Plan] 调用工具 {tool_name!r} (轮 {round_num})",
@@ -130,6 +149,7 @@ class Plan(BaseAgent):
             "WARNING",
             f"[Plan] 已达最大轮次 {self.max_rounds}，计划生成失败",
         )
+        self._report_cache_stats(self._brain.task_id)
         plan_span.finish()
         return None
 

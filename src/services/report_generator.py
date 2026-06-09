@@ -69,7 +69,8 @@ def _severity_label(severity: str) -> str:
         return "Low"
     return severity
 
-SCAN_SOURCES = frozenset({"quick_scan", "component_scan", "pattern_analyzer", "gapfill", "file_review"})
+
+SCAN_SOURCES = frozenset({"quick_scan", "component_scan", "pattern_analyzer"})
 
 
 # ---------- HTML 报告入口 ----------
@@ -85,6 +86,7 @@ def generate_html_report(
     quick_scan_findings: Optional[List[Dict[str, Any]]] = None,
     llm_findings: Optional[List[Dict[str, Any]]] = None,
     exploit_chain_report: Optional[Dict[str, Any]] = None,
+    language_stats: Optional[Dict[str, Any]] = None,
 ) -> str:
     """生成完整的 HTML 审计报告。
 
@@ -133,66 +135,101 @@ def generate_html_report(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>审计报告 - {_escape(project_name)}</title>
   <style>
-    body{{font-family:Segoe UI,PingFang SC,sans-serif;margin:0;background:#f0f5ff;color:#1a1a1a}}
-    main{{max-width:1120px;margin:0 auto;padding:32px 20px 64px}}
-    .card{{background:#fff;border:1px solid #dbeafe;border-radius:24px;padding:22px;box-shadow:0 18px 40px rgba(59,130,246,.12);margin-bottom:20px}}
-    .score-card{{display:flex;align-items:center;gap:20px;margin:12px 0;padding:12px 18px;border-radius:16px;background:#fff;border:1px solid #e0e7ff;flex-wrap:wrap}}
-    .score-ring{{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex-shrink:0}}
-    .score-ring.high{{background:#d1fae5;color:#065f46;border:3px solid #6ee7b7}}
-    .score-ring.medium{{background:#fef3c7;color:#92400e;border:3px solid #fcd34d}}
-    .score-ring.low{{background:#fecaca;color:#991b1b;border:3px solid #fca5a5}}
+    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+    html{{scroll-behavior:smooth;font-size:15px}}
+    body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;color:#1e293b;line-height:1.6}}
+    .app{{display:flex;min-height:100vh;max-width:1400px;margin:0 auto;padding:0 20px}}
+    .sidebar{{position:sticky;top:0;width:220px;height:100vh;padding:36px 16px 24px 0;flex-shrink:0;overflow-y:auto}}
+    .content{{flex:1;min-width:0;padding:32px 0 64px 32px;max-width:960px}}
+    .toc-header{{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}}
+    .toc{{display:flex;flex-direction:column;gap:2px}}
+    .toc-link{{display:block;padding:8px 12px;border-radius:8px;font-size:13px;color:#475569;text-decoration:none;transition:all .12s;border-left:3px solid transparent}}
+    .toc-link:hover{{background:#eaf3ff;color:#1677ff;border-left-color:#1677ff}}
+    .card{{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:24px;margin-bottom:20px;box-shadow:0 6px 18px rgba(31,42,68,.04)}}
+    .card h2{{font-size:17px;font-weight:600;margin-bottom:16px;color:#0f172a;display:flex;align-items:center;gap:8px}}
+    .hero{{background:linear-gradient(135deg,#eaf3ff,#f0f7ff);border:1px solid #b9d4fd}}
+    .hero h1{{font-size:22px;font-weight:700;color:#1e293b;margin-bottom:4px}}
+    .hero .muted{{font-size:13px;color:#64748b;margin-bottom:20px}}
+    .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:4px}}
+    .metric{{padding:14px 16px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0}}
+    .metric strong{{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#64748b;margin-bottom:4px}}
+    .metric span{{font-size:20px;font-weight:700;color:#0f172a}}
+    .callout{{padding:16px 20px;border-radius:8px;border:1px solid #b9d4fd;background:#f5f9ff;margin-top:16px}}
+    .callout strong{{font-size:14px;color:#1e293b;display:block;margin-bottom:6px}}
+    .callout p{{font-size:13px;color:#475569;line-height:1.7}}
+    .callout .counts{{margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;font-weight:500}}
+    .score-card{{display:flex;align-items:center;gap:20px;padding:16px 20px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;flex-wrap:wrap}}
+    .score-ring{{flex-shrink:0;width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;box-shadow:0 4px 12px rgba(31,42,68,.08)}}
+    .score-ring.high{{background:#d1fae5;color:#059669;border:3px solid #34d399}}
+    .score-ring.medium{{background:#fef3c7;color:#d97706;border:3px solid #fbbf24}}
+    .score-ring.low{{background:#fef2f2;color:#dc2626;border:3px solid #f87171}}
     .score-detail{{flex:1;min-width:200px}}
-    .score-detail .counts{{display:flex;gap:14px;flex-wrap:wrap;font-size:13px}}
-    .score-detail .counts span{{white-space:nowrap}}
-    .score-gate{{padding:4px 12px;border-radius:999px;font-size:12px;font-weight:600}}
-    .score-gate.pass{{background:#d1fae5;color:#065f46}}
-    .score-gate.fail{{background:#fecaca;color:#991b1b}}
-    .hero{{background:linear-gradient(135deg,#eff6ff,#dbeafe)}}
-    .hero h1,.project h3,.finding h4,.sub-card h4{{font-family:Georgia,Noto Serif SC,serif}}
-    .grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px}}
-    .metric{{padding:14px;border-radius:16px;background:#f0f5ff;border:1px solid #bfdbfe}}
-    .sub-card{{margin-top:16px;padding:16px;border-radius:18px;background:#f0f5ff;border:1px solid #bfdbfe}}
-    .finding{{border-top:1px solid #dbeafe;padding-top:14px;margin-top:14px}}
-    .badge{{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#dbeafe}}
-    .badge.critical{{background:#fecaca;color:#991b1b}}
-    .badge.high{{background:#fed7aa;color:#92400e}}
-    .badge.medium{{background:#bfdbfe;color:#1e40af}}
-    .badge.low{{background:#dbeafe;color:#3b82f6}}
-    .badge.source-quick{{background:#e0e7ff}}
-    .badge.source-llm{{background:#dbeafe}}
-    .badge.source-component{{background:#fef3c7;color:#92400e}}
-    .muted{{color:#667eea}}
-    .tag{{display:inline-block;margin:0 8px 8px 0;padding:6px 10px;border-radius:999px;background:#dbeafe;font-size:12px}}
-    .code-context{{margin:8px 0;padding:10px;border-radius:8px;background:#1a1a1a;color:#10b981;font-size:12px;overflow-x:auto;white-space:pre;font-family:Consolas,Monaco,monospace}}
-    .ast-context{{margin-top:12px;padding:12px;border-radius:12px;background:#f0fdf4;border:1px solid #86efac;font-size:13px}}
-    .ast-context p{{margin:4px 0}}
-    .callout{{padding:14px 16px;border-radius:18px;border:1px solid #bfdbfe;background:#eff6ff;margin-top:18px}}
-    a{{color:#2563eb}}
-    .finding-head{{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}}
-    .finding-meta{{font-size:13px;color:#666;margin-top:6px}}
-    .coverage-bar{{height:8px;border-radius:4px;background:#e0e7ff;overflow:hidden;margin-top:6px}}
-    .coverage-fill{{height:100%;border-radius:4px;transition:width 0.3s}}
-    .coverage-fill.high{{background:#6ee7b7}}
-    .coverage-fill.medium{{background:#fcd34d}}
-    .coverage-fill.low{{background:#fca5a5}}
-    table{{width:100%;border-collapse:collapse;margin-top:12px}}
-    th,td{{padding:8px 12px;text-align:left;border-bottom:1px solid #e0e7ff;font-size:13px}}
-    th{{background:#f0f5ff;font-weight:600}}
-    @media (max-width:900px){{.grid{{grid-template-columns:1fr}}.finding-head{{display:block}}}}
+    .score-detail .primary{{font-size:15px;font-weight:600;color:#0f172a;margin-bottom:2px}}
+    .score-detail .secondary{{font-size:13px;color:#64748b}}
+    .score-gate{{display:inline-block;padding:3px 10px;border-radius:6px;font-size:12px;font-weight:600}}
+    .score-gate.pass{{background:#d1fae5;color:#059669}}
+    .score-gate.fail{{background:#fef2f2;color:#dc2626}}
+    .finding{{border-top:1px solid #e2e8f0;padding-top:16px;margin-top:16px}}
+    .finding:first-child{{border-top:none;padding-top:0;margin-top:0}}
+    .finding-head{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:8px}}
+    .finding-head h4{{font-size:14px;font-weight:600;color:#0f172a;margin:0;flex:1}}
+    .finding p,.finding .desc{{font-size:13px;color:#475569;line-height:1.6;margin-top:6px}}
+    .finding p strong{{color:#334155}}
+    .badge{{display:inline-block;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:500;white-space:nowrap}}
+    .badge.critical{{background:#fef2f2;color:#dc2626}}
+    .badge.high{{background:#fef3c7;color:#d97706}}
+    .badge.medium{{background:#eff6ff;color:#2563eb}}
+    .badge.low{{background:#f1f5f9;color:#64748b}}
+    .badge.source-quick{{background:#eaf3ff;color:#1677ff}}
+    .badge.source-llm{{background:#f5f3ff;color:#7c3aed}}
+    .code-context{{margin:8px 0;padding:12px 14px;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;overflow-x:auto;white-space:pre;font-family:"JetBrains Mono","Cascadia Code","Fira Code",Consolas,monospace;line-height:1.5}}
+    .ast-context{{margin-top:12px;padding:12px 14px;border-radius:8px;background:#f0fdf4;border:1px solid #a7f3d0;font-size:13px}}
+    .ast-context p{{margin:2px 0}}
+    .sub-card{{margin-top:16px;padding:16px 20px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0}}
+    .sub-card h4{{font-size:14px;font-weight:600;color:#0f172a;margin-bottom:10px}}
+    .coverage-bar{{height:8px;border-radius:999px;background:#e2e8f0;overflow:hidden;margin-top:8px}}
+    .coverage-fill{{height:100%;border-radius:999px;transition:width .3s}}
+    .coverage-fill.high{{background:#34d399}}
+    .coverage-fill.medium{{background:#fbbf24}}
+    .coverage-fill.low{{background:#f87171}}
+    .muted{{color:#64748b}}
+    .tag{{display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border-radius:6px;background:#f1f5f9;border:1px solid #e2e8f0;font-size:12px;color:#475569}}
+    table{{width:100%;font-size:13px;border-collapse:collapse}}
+    th{{text-align:left;padding:6px 8px;border-bottom:2px solid #e2e8f0;color:#64748b;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}}
+    td{{padding:6px 8px;border-bottom:1px solid #f1f5f9}}
+    tr:last-child td{{border-bottom:none}}
+    a{{color:#1677ff;text-decoration:none}}
+    a:hover{{text-decoration:underline}}
+    .finding-meta{{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:13px}}
+    .finding-meta .tag{{font-size:12px;padding:2px 8px;border-radius:6px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}}
+    @media (max-width:860px){{.sidebar{{display:none}}.content{{padding-left:0}}.grid{{grid-template-columns:1fr}}}}
   </style>
 </head>
 <body>
-  <main>
-    {_build_hero_section(task_id, project_name, now, total_findings, severity_counts, scan_stats, findings)}
-    {_build_score_section(audit_score, severity_counts)}
-    {_build_findings_section("快速扫描结果", quick_scan_findings, "source-quick", "规则层未发现高置信度结果。")}
-    {_build_findings_section("LLM 深度审计结果", llm_findings, "source-llm", "LLM 未发现额外漏洞。")}
-    {_build_exploit_chain_section(exploit_chain_report)}
-    {_build_coverage_section(coverage_report)}
-  </main>
+  <div class="app">
+    <nav class="sidebar">
+      <div class="toc-header">报告目录</div>
+      <div class="toc">
+        <a href="#sec-hero" class="toc-link">摘要信息</a>
+        <a href="#sec-score" class="toc-link">安全评分</a>
+        <a href="#sec-quick-scan" class="toc-link">快速扫描结果</a>
+        <a href="#sec-llm-audit" class="toc-link">LLM 深度审计</a>
+        <a href="#sec-coverage" class="toc-link">审计覆盖率</a>
+      </div>
+    </nav>
+    <div class="content">
+      {_build_hero_section(task_id, project_name, now, total_findings, severity_counts, scan_stats, findings, language_stats)}
+      {_build_score_section(audit_score, severity_counts)}
+      {_build_findings_section("快速扫描结果", quick_scan_findings, "source-quick", "规则层未发现高置信度结果。")}
+      {_build_findings_section("LLM 深度审计结果", llm_findings, "source-llm", "LLM 未发现额外漏洞。")}
+      {_build_exploit_chain_section(exploit_chain_report)}
+      {_build_coverage_section(coverage_report)}
+    </div>
+  </div>
 </body>
 </html>"""
     return doc
+
 
 
 def _build_hero_section(
@@ -203,16 +240,32 @@ def _build_hero_section(
     severity_counts: Dict[str, int],
     scan_stats: Optional[Dict[str, Any]],
     findings: List[Dict[str, Any]],
+    language_stats: Optional[Dict[str, Any]] = None,
 ) -> str:
     """构建报告头部区域。"""
-    stats_html = ""
+    # 从 findings 中统计各来源数量
+    source_counts: Dict[str, int] = {}
+    for f in findings:
+        src = f.get("source", "unknown")
+        source_counts[src] = source_counts.get(src, 0) + 1
+    
+    rule_findings = source_counts.get("quick_scan", 0) + source_counts.get("pattern_analyzer", 0) + source_counts.get("component_scan", 0)
+    llm_findings = source_counts.get("file_review", 0) + source_counts.get("gapfill", 0) + source_counts.get("chain_analysis", 0)
+
+    source_mode = str(scan_stats.get("source_mode") or "unknown") if scan_stats else "unknown"
+    total_files_scanned = 0
     if scan_stats:
-        stats_html = f"""
+        total_files_scanned = scan_stats.get("total_files_scanned", scan_stats.get("total_files", 0))
+    
+    # 构建统计卡片
+    stats_html = f"""
       <div class="grid">
-        <div class="metric"><strong>扫描文件数</strong><br/>{_escape(str(scan_stats.get('total_files_scanned', 0)))}</div>
-        <div class="metric"><strong>代码发现</strong><br/>{_escape(str(scan_stats.get('code_findings', 0)))}</div>
-        <div class="metric"><strong>组件漏洞</strong><br/>{_escape(str(scan_stats.get('component_findings', 0)))}</div>
-        <div class="metric"><strong>总发现数</strong><br/>{_escape(str(total_findings))}</div>
+        <div class="metric"><strong>扫描文件数</strong><span>{_escape(str(total_files_scanned))}</span></div>
+        <div class="metric"><strong>规则层结果</strong><span>{_escape(str(rule_findings))}</span></div>
+        <div class="metric"><strong>LLM 复核结果</strong><span>{_escape(str(llm_findings))}</span></div>
+        <div class="metric"><strong>确认结果</strong><span>{_escape(str(total_findings))}</span></div>
+        <div class="metric"><strong>来源模式</strong><span>{_escape(str(source_mode))}</span></div>
+        <div class="metric"><strong>生成时间</strong><span>{_escape(str(now))}</span></div>
       </div>"""
 
     # 收集审计技能标签
@@ -240,17 +293,38 @@ def _build_hero_section(
     skill_tags_set.add("GB/T 国标代码安全审计")
     skill_tags = "".join(f'<span class="tag">{_escape(t)}</span>' for t in sorted(skill_tags_set))
 
+    # 语言统计表
+    lang_html = ""
+    if language_stats:
+        langs = language_stats.get("languages", {})
+        total = language_stats.get("total", {})
+        if langs:
+            rows = ""
+            for lang, s in sorted(langs.items(), key=lambda x: -x[1].get("code", 0)):
+                if s.get("code", 0) > 0:
+                    rows += f"<tr><td>{_escape(lang)}</td><td style='text-align:right'>{s.get('files', 0)}</td><td style='text-align:right'>{s.get('code', 0):,}</td></tr>\n"
+            if total:
+                rows += f"<tr style='font-weight:600;border-top:2px solid #93c5fd'><td>合计</td><td style='text-align:right'>{total.get('files', 0)}</td><td style='text-align:right'>{total.get('code', 0):,}</td></tr>"
+            lang_html = f"""
+      <div class="sub-card">
+        <h4 style="margin:0 0 10px">项目语言分布</h4>
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <thead><tr style="text-align:left;border-bottom:2px solid #93c5fd"><th style="padding:4px 8px">语言</th><th style="text-align:right;padding:4px 8px">文件数</th><th style="text-align:right;padding:4px 8px">代码行数</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </div>"""
+
     return f"""
-    <section class="card hero">
+    <section class="card hero" id="sec-hero">
       <h1>防御性代码审计报告</h1>
       <p class="muted">报告分为两层：规则型快速扫描，以及 LLM 深度复核。全程不包含利用方式或攻击载荷。</p>
       <div class="grid">
         <div class="metric"><strong>任务 ID</strong><br/>{_escape(task_id)}</div>
         <div class="metric"><strong>项目名称</strong><br/>{_escape(project_name)}</div>
-        <div class="metric"><strong>生成时间</strong><br/>{_escape(now)}</div>
-        <div class="metric"><strong>确认结果</strong><br/>{_escape(str(total_findings))}</div>
+        <div class="metric"><strong>任务阶段</strong><br/>completed</div>
       </div>
       {stats_html}
+      {lang_html}
       <div class="callout">
         <strong>执行摘要</strong>
         <p>本次审计共发现 {total_findings} 个潜在安全漏洞（Critical: {severity_counts['C']}，High: {severity_counts['H']}，Medium: {severity_counts['M']}，Low: {severity_counts['L']}）。规则引擎基于 sink 模式匹配快速扫描代码仓库，识别出命令注入、SQL注入、路径遍历、XSS、SSRF 等攻击面。如果某个文件没有发现报告，不代表绝对安全，只表示当前规则集下未匹配到高置信度问题。</p>
@@ -283,20 +357,21 @@ def _build_score_section(
     gate_label = "通过" if gate == "pass" else "未通过"
 
     return f"""
-    <section class="card">
+    <section class="card" id="sec-score">
       <h2>审计评分</h2>
       <div class="score-card">
         <div class="score-ring {ring_class}">{score}</div>
         <div class="score-detail">
-          <strong>安全评分: {score}/100 ({grade} — {grade_desc})</strong>
-          <div class="counts">
-            <span style="color:#991b1b">Critical: {severity_counts['C']}</span>
-            <span style="color:#92400e">High: {severity_counts['H']}</span>
-            <span style="color:#1e40af">Medium: {severity_counts['M']}</span>
-            <span style="color:#3b82f6">Low: {severity_counts['L']}</span>
+          <div class="primary">安全评分: {score}/100 ({grade} — {grade_desc})</div>
+          <div style="margin-top:8px">
+            <span class="badge critical">Critical: {severity_counts['C']}</span>
+            <span class="badge high">High: {severity_counts['H']}</span>
+            <span class="badge medium">Medium: {severity_counts['M']}</span>
+            <span class="badge low">Low: {severity_counts['L']}</span>
           </div>
+          <div class="secondary" style="margin-top:6px;color:#94a3b8;font-size:12px">{_escape(gate_reason)}</div>
         </div>
-        <span class="score-gate {gate_class}">{gate_label}: {_escape(gate_reason)}</span>
+        <span class="score-gate {gate_class}">{gate_label}</span>
       </div>
     </section>"""
 
@@ -308,9 +383,10 @@ def _build_findings_section(
     empty_message: str,
 ) -> str:
     """构建漏洞发现列表区域。"""
+    sec_id = "sec-quick-scan" if "快速" in title else "sec-llm-audit"
     if not findings:
         return f"""
-    <section class="card">
+    <section class="card" id="{sec_id}">
       <h2>{_escape(title)}</h2>
       <p class="muted">{_escape(empty_message)}</p>
     </section>"""
@@ -320,7 +396,7 @@ def _build_findings_section(
         findings_html += _render_finding(idx + 1, f, source_badge_class)
 
     return f"""
-    <section class="card">
+    <section class="card" id="{sec_id}">
       <h2>{_escape(title)} ({len(findings)} 条)</h2>
       {findings_html}
     </section>"""
@@ -352,6 +428,8 @@ def _render_finding(index: int, f: Dict[str, Any], source_badge_class: str) -> s
     language = f.get("language", "")
     sink = f.get("sink", [])
     evidence_points = f.get("evidence_points", [])
+    status = f.get("status", "")
+    verification_status = f.get("verification_status", "")
 
     # 代码片段
     snippet_html = ""
@@ -370,6 +448,15 @@ def _render_finding(index: int, f: Dict[str, Any], source_badge_class: str) -> s
     # 来源标签
     source_label = {"quick_scan": "规则扫描", "component_scan": "组件扫描", "pattern_analyzer": "模式匹配", "gapfill": "覆盖盲区", "file_review": "文件审计", "llm": "LLM复核"}.get(source, source)
 
+    # 确认状态 badge
+    confirmed_html = ""
+    if status == "confirmed" or verification_status == "confirmed":
+        confirmed_html = '<span class="badge called">✓ 已确认</span>'
+    elif status == "pending" or verification_status == "pending":
+        confirmed_html = '<span class="badge pending">待确认</span>'
+    elif status == "false_positive" or verification_status == "false_positive":
+        confirmed_html = '<span class="badge">✗ 误报</span>'
+
     # Sink + 证据点摘要
     sink_html = ""
     if sink or evidence_points:
@@ -384,6 +471,9 @@ def _render_finding(index: int, f: Dict[str, Any], source_badge_class: str) -> s
     ast_html = ""
     if isinstance(ast_context, dict) and ast_context.get("sink"):
         ac = ast_context
+        # AST 代码上下文（来自 ast_context 或 code_snippet）
+        ast_code = ac.get("code_context") or ac.get("codeSnippet") or ""
+        code_html = f'<pre class="code-context">{_escape(str(ast_code))}</pre>' if ast_code else ""
         ast_html = f"""
       <div class="ast-context">
         <p><strong>--- AST 深度分析 ---</strong></p>
@@ -392,6 +482,7 @@ def _render_finding(index: int, f: Dict[str, Any], source_badge_class: str) -> s
         <p><strong>用户输入检测：</strong>{'✓ 有' if ac.get('has_user_input') else '✗ 无'}</p>
         <p><strong>输入验证：</strong>{'✓ 有' if ac.get('has_validation') else '✗ 无'}</p>
         <p><strong>编码处理：</strong>{'✓ 有' if ac.get('has_encoding') else '✗ 无'}</p>
+        {f'<p><strong>代码上下文：</strong></p>{code_html}' if code_html else ''}
         {f'<p><strong>深度建议：</strong>{_escape(str(ac.get("recommendation", "")))}</p>' if ac.get('recommendation') else ''}
       </div>"""
 
@@ -404,6 +495,7 @@ def _render_finding(index: int, f: Dict[str, Any], source_badge_class: str) -> s
             <span class="badge {source_badge_class}">{_escape(source_label)}</span>
             {cve_html}
             {cwe_html}
+            {confirmed_html}
           </div>
         </div>
         <div class="finding-meta">
@@ -462,7 +554,7 @@ def _build_coverage_section(coverage_report: Optional[Dict[str, Any]]) -> str:
       </table>"""
 
     return f"""
-    <section class="card">
+    <section class="card" id="sec-coverage">
       <h2>审计覆盖率</h2>
       <div class="score-card">
         <div class="score-ring {fill_class}">{rate:.0f}%</div>
@@ -533,7 +625,7 @@ def _build_exploit_chain_section(chain_report: Optional[Dict[str, Any]]) -> str:
     max_risk = summary.get("max_risk_score", 0)
 
     return f"""
-    <section class="card">
+    <section class="card" id="sec-chains">
       <h2>利用链分析 <span class="badge" style="background:#fef3c7;color:#92400e">{total_chains} 条链</span></h2>
       <div style="display:flex;gap:20px;margin:12px 0;flex-wrap:wrap">
         <div class="metric"><strong>利用链数</strong><br/>{total_chains}</div>
@@ -554,6 +646,7 @@ def write_report_to_file(
     quick_scan_findings: Optional[List[Dict[str, Any]]] = None,
     llm_findings: Optional[List[Dict[str, Any]]] = None,
     exploit_chain_report: Optional[Dict[str, Any]] = None,
+    language_stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """生成 HTML 报告并写入文件。
 
@@ -574,6 +667,7 @@ def write_report_to_file(
         quick_scan_findings=quick_scan_findings,
         llm_findings=llm_findings,
         exploit_chain_report=exploit_chain_report,
+        language_stats=language_stats,
     )
 
     with open(file_path, "w", encoding="utf-8") as f:

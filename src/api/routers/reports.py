@@ -21,20 +21,65 @@ router = APIRouter(dependencies=[CurrentUserDep])
 
 
 def _extract_quick_scan_stats(events: list[EventRecord]) -> dict:
-    """从事件记录中提取快速扫描统计。"""
+    """从事件记录中提取快速扫描统计。
+
+    返回字段：
+        completed: 快速扫描是否完成
+        findings_count: 总发现数
+        rule_findings: 规则层发现数
+        llm_findings: LLM 复核发现数
+        rule_targets: 规则层扫描目标数
+        llm_called_targets: LLM 已调用目标数
+        llm_skipped_targets: LLM 跳过目标数
+        source_mode: 来源模式
+    """
+    result = {
+        "completed": False,
+        "findings_count": 0,
+        "rule_findings": 0,
+        "llm_findings": 0,
+        "rule_targets": 0,
+        "llm_called_targets": 0,
+        "llm_skipped_targets": 0,
+        "reason": "",
+        "source_mode": "unknown",
+    }
+
     for ev in events:
-        if "快速扫描" in (ev.reason or ""):
-            # 尝试从 final_status 提取结果
-            result_text = ev.final_status or ""
-            # 从 reason 提取发现数量
-            match = re.search(r"(\d+)\s*个潜在问题", ev.reason or "")
-            count = int(match.group(1)) if match else 0
-            return {
-                "completed": ev.status == "completed",
-                "findings_count": count,
-                "reason": ev.reason or "",
-            }
-    return {"completed": False, "findings_count": 0, "reason": ""}
+        reason = ev.reason or ""
+        # 快速扫描
+        if "快速扫描" in reason or "quick_scan" in reason.lower():
+            result["completed"] = ev.status == "completed"
+            # 提取发现数量
+            match = re.search(r"(\d+)\s*个潜在问题", reason)
+            if match:
+                result["findings_count"] = int(match.group(1))
+            result["reason"] = reason
+        # LLM 已调用目标数
+        llm_match = re.search(r"LLM\s*(?:已复核|调用)[^\d]*(\d+)\s*(?:个|条|目标)", reason)
+        if llm_match:
+            result["llm_called_targets"] = int(llm_match.group(1))
+        # LLM 跳过目标数
+        skip_match = re.search(r"LLM\s*跳过[^\d]*(\d+)\s*(?:个|条|目标)", reason)
+        if skip_match:
+            result["llm_skipped_targets"] = int(skip_match.group(1))
+        # 来源模式检测
+        if "GitHub" in reason:
+            result["source_mode"] = "GitHub 候选发现"
+        elif "Gitee" in reason:
+            result["source_mode"] = "Gitee 候选发现"
+        elif "URL" in reason or "url" in reason.lower():
+            result["source_mode"] = "URL 导入"
+        elif "ZIP" in reason or "zip" in reason.lower():
+            result["source_mode"] = "ZIP 代码包上传"
+        elif "本地" in reason or "local" in reason.lower():
+            result["source_mode"] = "本地代码导入"
+        # 规则层目标数
+        rule_match = re.search(r"规则层[^\d]*(\d+)\s*(?:个|条|目标)", reason)
+        if rule_match:
+            result["rule_targets"] = int(rule_match.group(1))
+
+    return result
 
 
 def _extract_coverage_data(events: list[EventRecord]) -> dict:
@@ -92,19 +137,21 @@ def get_report(task_id: str) -> OkResponse[dict]:
             .scalars()
             .all()
         )
-        # 跨源去重（相同 file+type+line 仅保留优先级最高的记录）
-        from src.services.vulnerability_service import deduplicate_findings
-        findings_rows = deduplicate_findings(list(findings_rows))
+        # 使用 collect_enriched_findings 获取完整的 findings 数据（与 regenerate 逻辑一致）
+        project = session.get(Project, task.project_id) if task.project_id else None
+        project_path = project.storage_path if project else ""
+        from src.services.vulnerability_service import collect_enriched_findings
+        findings_payload = collect_enriched_findings(task_id, project_path)
 
-        # 结论聚合
-        verdict_counts = dict(
-            session.execute(
-                select(Vulnerability.verdict, func.count())
-                .where(Vulnerability.task_id == task_id)
-                .where(Vulnerability.status != "false_positive")
-                .group_by(Vulnerability.verdict)
-            ).all()
-        )
+        rule_source_set = {"quick_scan", "component_scan", "pattern_analyzer"}
+        rule_findings_count = len([f for f in findings_payload if f.get("source") in rule_source_set])
+        llm_findings_count = len([f for f in findings_payload if f.get("source") not in rule_source_set])
+
+        # 从 findings 计算 verdict 分布
+        verdict_counts = {}
+        for f in findings_payload:
+            v = str(f.get("verdict", "unknown") or "unknown")
+            verdict_counts[v] = verdict_counts.get(v, 0) + 1
 
         # LLM 事件数量
         action_counts = dict(
@@ -136,37 +183,40 @@ def get_report(task_id: str) -> OkResponse[dict]:
             .all()
         )
 
-        findings_payload = [
-            {
-                "id": f.id,
-                "vul_name": f.vul_name,
-                "verdict": f.verdict,
-                "confidence": f.confidence or "LOW",
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-                "neo4j_element_id": f.neo4j_element_id,
-            }
-            for f in findings_rows
-        ]
-
         li, lo, ci, co = sum_task_tokens_from_ledger(session, task_id)
 
         # 快速扫描统计：findings_count 用数据库实际入库数量，与 severity 统计一致
         quick_scan = _extract_quick_scan_stats(list(info_events))
         quick_scan["findings_count"] = len(findings_payload)
+        # 按 source 分类统计（与参考报告格式对齐）
+        quick_scan["rule_findings"] = rule_findings_count
+        quick_scan["llm_findings"] = llm_findings_count
 
-        # 覆盖率数据
-        coverage = _extract_coverage_data(list(info_events))
+        # 覆盖率数据：从项目文件重新计算（不依赖事件历史）
+        from src.services.coverage_tracker import CoverageTracker
+        _project_file_list = []
+        try:
+            from src.core.orchestrator import Orchestrator
+            _orch = Orchestrator()
+            _project_file_list = _orch._collect_project_files(str(project_path))
+        except Exception:
+            pass
+        _ct = CoverageTracker(str(project_path), _project_file_list)
+        for _pf in _project_file_list:
+            _ct.mark_reviewed(_pf, "quick_scan")
+        for _f in findings_payload:
+            _file = _f.get("file", "")
+            if _file:
+                _ct.mark_reviewed(_file, _f.get("vuln_type", ""))
+        coverage = _ct.generate_report()
 
         # HTML 报告路径
-        project = session.get(Project, task.project_id) if task.project_id else None
-        project_path = project.storage_path if project else ""
         html_report = _find_html_report(project_path, task_id)
 
-        # 严重等级分布
+        # 严重等级分布（从 enriched findings 中统计）
         severity_counts = {"C": 0, "H": 0, "M": 0, "L": 0}
-        for f in findings_rows:
-            # level 字段存储 CRITICAL/HIGH/MEDIUM/LOW
-            lvl = str(f.level or "").upper()
+        for f in findings_payload:
+            lvl = str(f.get("severity", "")).upper()
             if lvl in ("CRITICAL", "C"):
                 severity_counts["C"] += 1
             elif lvl in ("HIGH", "H"):
@@ -175,6 +225,40 @@ def get_report(task_id: str) -> OkResponse[dict]:
                 severity_counts["M"] += 1
             else:
                 severity_counts["L"] += 1
+
+        # audit_score：从 findings 计算
+        audit_score_result = None
+        try:
+            from src.knowledge.audit_scoring import calculate_audit_score
+            audit_score_result = calculate_audit_score(findings_payload)
+        except Exception:
+            pass
+
+        # scan_stats：从 findings 统计
+        scan_stats = {
+            "code_findings": len([f for f in findings_payload if f.get("source") == "quick_scan"]),
+            "component_findings": len([f for f in findings_payload if f.get("source") == "component_scan"]),
+            "total_findings": len(findings_payload),
+            "rule_findings": rule_findings_count,
+            "llm_findings": llm_findings_count,
+            "source_mode": "URL 导入",  # 默认值，后续从事件覆盖
+        }
+        for ev in info_events:
+            if "快速扫描" in (ev.reason or ""):
+                import re
+                m = re.search(r"(\d+)\s*个潜在问题", ev.reason or "")
+                if m:
+                    scan_stats["total_candidates"] = int(m.group(1))
+                # 来源模式
+                reason = ev.reason or ""
+                if "GitHub" in reason:
+                    scan_stats["source_mode"] = "GitHub 候选发现"
+                elif "Gitee" in reason:
+                    scan_stats["source_mode"] = "Gitee 候选发现"
+                elif "ZIP" in reason:
+                    scan_stats["source_mode"] = "ZIP 代码包上传"
+                elif "URL" in reason:
+                    scan_stats["source_mode"] = "URL 导入"
 
         report = {
             "task": {
@@ -201,6 +285,8 @@ def get_report(task_id: str) -> OkResponse[dict]:
             "quick_scan": quick_scan,
             "coverage": coverage,
             "html_report": html_report,
+            "scan_stats": scan_stats,
+            "audit_score": audit_score_result,
             "findings": findings_payload,
         }
         return OkResponse[dict](data=report)
@@ -252,23 +338,9 @@ def regenerate_html_report(task_id: str):
         if not project_path:
             raise HTTPException(status_code=400, detail="project storage_path is empty")
 
-        # 查询所有发现 + 明细（排除误报）
-        rows = session.query(Vulnerability).filter(
-            Vulnerability.task_id == task_id,
-            Vulnerability.status != "false_positive",
-        ).all()
-        # 跨源去重（相同 file+type+line 仅保留优先级最高的记录）
-        from src.services.vulnerability_service import deduplicate_findings
-        rows = deduplicate_findings(list(rows))
-
-        # 预加载所有 detail
-        detail_map = {}
-        from src.infrastructure.db.models.vulnerability import VulnerabilityDetail
-        details = session.query(VulnerabilityDetail).filter(
-            VulnerabilityDetail.vulnerability_id.in_([r.id for r in rows])
-        ).all()
-        for d in details:
-            detail_map[d.vulnerability_id] = d
+        # 使用共享的 collect_enriched_findings（与 orchestrator 首次报告逻辑一致）
+        from src.services.vulnerability_service import collect_enriched_findings
+        findings = collect_enriched_findings(task_id, project_path)
 
         # 查询扫描统计信息事件
         evs = session.query(EventRecord).filter(
@@ -276,106 +348,8 @@ def regenerate_html_report(task_id: str):
             EventRecord.action_type == "information"
         ).order_by(EventRecord.started_at.asc()).all()
 
-        findings = []
-        for row in rows:
-            detail = detail_map.get(row.id)
-            entry_points_str = detail.entry_points if detail and detail.entry_points else ""
-            evidence_str = detail.evidence if detail and detail.evidence else ""
-            detail_str = detail.detail if detail and detail.detail else ""
-            verification_reason = detail.verification_reason if detail and detail.verification_reason else ""
-            ast_context = detail.ast_context if detail and detail.ast_context else {}
-            exploitation_chain = detail.exploitation_chain if detail and detail.exploitation_chain else {}
-
-            # 读取新字段（已有数据为空时从知识映射推导）
-            vuln_type = row.category_name or ""
-
-            remediation = (detail.remediation if detail else "") or ""
-            safe_validation = (detail.safe_validation if detail else "") or ""
-            impact = (detail.impact if detail else "") or detail_str
-            owasp = (detail.owasp if detail else "") or ""
-            gbt_mapping = (detail.gbt_mapping if detail else "") or ""
-            cwe = (detail.cwe if detail else "") or ""
-            code_snippet = (detail.code_snippet if detail else "") or ""
-            language = (detail.language if detail else "") or ""
-            cvss_score = (detail.cvss_score if detail else "") or ""
-            sink_val = (detail.sink if detail and detail.sink else []) or []
-
-            # 对已有数据：从知识映射推导缺失字段
-            if not cwe and vuln_type:
-                try:
-                    from src.knowledge.audit_config import VULN_CWE_MAP
-                    cwe = VULN_CWE_MAP.get(vuln_type.upper(), "")
-                except Exception:
-                    pass
-            if not owasp and vuln_type:
-                try:
-                    from src.knowledge.owasp_mapping import OWASP_MAPPING, OWASP_NAMES
-                    oids = OWASP_MAPPING.get(vuln_type.upper(), [])
-                    owasp = ", ".join(f"{oid} {OWASP_NAMES.get(oid, '')}" for oid in oids)
-                except Exception:
-                    pass
-            if not gbt_mapping and vuln_type:
-                try:
-                    from src.knowledge.gbt_standards import get_gbt_mapping
-                    gbt_mapping = get_gbt_mapping(vuln_type.upper(), language) or ""
-                except Exception:
-                    pass
-            if not cvss_score:
-                sev = (row.level or "M").upper()
-                cvss_score = {"C": "9.5", "H": "7.5", "M": "5.0", "L": "2.0"}.get(sev, "5.0")
-            if not code_snippet and not row.source == "chain_analysis":
-                # 使用证据或详情作为代码上下文
-                code_snippet = evidence_str or detail_str
-            if not language and entry_points_str:
-                ext = os.path.splitext(entry_points_str.split("\n")[0].split(":")[0])[1].lower()
-                lang_map = {".py": "python", ".js": "javascript", ".ts": "typescript",
-                            ".java": "java", ".go": "go", ".php": "php", ".rb": "ruby",
-                            ".c": "c", ".cpp": "cpp", ".cs": "csharp"}
-                language = lang_map.get(ext, "")
-
-            findings.append({
-                "id": row.id,
-                "project_id": row.project_id,
-                "task_id": row.task_id,
-                "vul_name": row.vul_name,
-                "title": row.vul_name,
-                "vuln_type": vuln_type,
-                "vulnType": vuln_type,
-                "type": vuln_type,
-                "category_name": vuln_type,
-                "verdict": row.verdict,
-                "severity": row.level or "L",
-                "level": row.level or "L",
-                "confidence": float(row.confidence or 0) if str(row.confidence or "").replace(".", "").isdigit() else 0.5,
-                "source": row.source or "quick_scan",
-                "neo4j_element_id": row.neo4j_element_id or "",
-                "status": row.status,
-                "verification_status": row.verification_status,
-                "evidence": evidence_str,
-                "reason": evidence_str,
-                "detail": detail_str,
-                "remediation": remediation,
-                "safe_validation": safe_validation,
-                "impact": impact,
-                "impact_description": impact,
-                "verification_note": verification_reason,
-                "code_snippet": code_snippet,
-                "cwe": cwe,
-                "owasp": owasp,
-                "gbt_mapping": gbt_mapping,
-                "language": language,
-                "cvss_score": float(cvss_score) if cvss_score and cvss_score.replace(".", "").isdigit() else 5.0,
-                "location": entry_points_str.split("\n")[0] if entry_points_str else "",
-                "file": entry_points_str.split("\n")[0] if entry_points_str else "",
-                "entry_points": entry_points_str,
-                "ast_context": ast_context if isinstance(ast_context, dict) else {},
-                "exploitation_chain": exploitation_chain if isinstance(exploitation_chain, dict) else {},
-                "sink": sink_val if isinstance(sink_val, list) else [],
-                "evidence_points": entry_points_str.split("\n") if entry_points_str else [],
-            })
-
-        quick_scan = [f for f in findings if f.get("source") in ("quick_scan", "component_scan", "pattern_analyzer", "gapfill", "file_review")]
-        llm = [f for f in findings if f.get("source") not in ("quick_scan", "component_scan", "pattern_analyzer", "gapfill", "file_review")]
+        quick_scan = [f for f in findings if f.get("source") in ("quick_scan", "component_scan", "pattern_analyzer")]
+        llm = [f for f in findings if f.get("source") not in ("quick_scan", "component_scan", "pattern_analyzer")]
 
         # --- audit_score：从 findings 重新计算 ---
         audit_score_result = None
@@ -387,19 +361,48 @@ def regenerate_html_report(task_id: str):
             logging.getLogger(__name__).warning(f"[regenerate] calculate_audit_score 失败: {e}")
 
         # --- scan_stats：从事件 + findings 统计重建 ---
+        rule_source_set = {"quick_scan", "component_scan", "pattern_analyzer"}
+        rule_findings_list = [f for f in findings if f.get("source") in rule_source_set]
+        llm_findings_list = [f for f in findings if f.get("source") not in rule_source_set]
+
+        # 获取项目文件数
+        total_files_scanned = 0
+        try:
+            from src.core.orchestrator import Orchestrator
+            _orch = Orchestrator()
+            total_files_scanned = len(_orch._collect_project_files(str(project_path)))
+        except Exception:
+            pass
+
         scan_stats = {
             "code_findings": len([f for f in findings if f.get("source") == "quick_scan"]),
             "component_findings": len([f for f in findings if f.get("source") == "component_scan"]),
             "total_findings": len(findings),
+            "rule_findings": len(rule_findings_list),
+            "llm_findings": len(llm_findings_list),
+            "total_files_scanned": total_files_scanned,
+            "source_mode": "URL 导入",  # 默认值，后续从事件覆盖
         }
         # 从 information 事件提取原始扫描统计
         for ev in evs:
-            if "快速扫描" in (ev.reason or ""):
+            reason = ev.reason or ""
+            # 来源模式（所有事件中检测，避免被 "快速扫描" 内的覆盖逻辑重复设置）
+            src_set = scan_stats.get("source_mode", "unknown")
+            if src_set == "unknown" or src_set == "URL 导入":
+                if "GitHub" in reason:
+                    scan_stats["source_mode"] = "GitHub 候选发现"
+                elif "Gitee" in reason:
+                    scan_stats["source_mode"] = "Gitee 候选发现"
+                elif "ZIP" in reason or "zip" in reason.lower():
+                    scan_stats["source_mode"] = "ZIP 代码包上传"
+                elif "URL" in reason or "url" in reason.lower():
+                    scan_stats["source_mode"] = "URL 导入"
+            # 候选发现数
+            if "快速扫描" in reason:
                 import re
-                m = re.search(r"(\d+)\s*个潜在问题", ev.reason or "")
+                m = re.search(r"(\d+)\s*个潜在问题", reason)
                 if m:
                     scan_stats["total_candidates"] = int(m.group(1))
-                reason = ev.reason or ""
                 if "代码" in reason:
                     m2 = re.search(r"代码=(\d+)", reason)
                     if m2:
@@ -409,43 +412,31 @@ def regenerate_html_report(task_id: str):
                     if m3:
                         scan_stats["component_findings"] = int(m3.group(1))
 
-        # --- coverage_report：从事件数据重建 ---
+        # --- coverage_report：从项目文件重新计算 ---
         coverage_report = None
-        for ev in evs:
-            reason = ev.reason or ""
-            if "覆盖率" in reason:
-                import re
-                m = re.search(r"([\d.]+)%", reason)
-                rate = float(m.group(1)) if m else 0
-                m2 = re.search(r"(\d+)/(\d+)", reason)
-                reviewed = int(m2.group(1)) if m2 else 0
-                total = int(m2.group(2)) if m2 else 0
-                coverage_report = {
-                    "coverage_rate": rate,
-                    "reviewed_files": reviewed,
-                    "total_files": total,
-                    "unreviewed_code_files": max(0, total - reviewed),
-                    "reviewed_attack_classes": [],
-                    "subsystem_gaps": {},
-                }
-                break
-        if coverage_report is None:
-            # 兜底：使用 API 已有数据
-            from sqlalchemy import text
-            row = session.execute(
-                text("SELECT coverage_rate FROM tasks WHERE id = :task_id"),
-                {"task_id": task_id}
-            ).fetchone()
-            if row and row[0]:
-                rate = float(row[0])
-                coverage_report = {
-                    "coverage_rate": rate,
-                    "reviewed_files": 0,
-                    "total_files": 0,
-                    "unreviewed_code_files": 0,
-                    "reviewed_attack_classes": [],
-                    "subsystem_gaps": {},
-                }
+        try:
+            from src.services.coverage_tracker import CoverageTracker
+            from src.core.orchestrator import Orchestrator
+            _orch = Orchestrator()
+            _project_file_list = _orch._collect_project_files(str(project_path))
+            _ct = CoverageTracker(str(project_path), _project_file_list)
+            for _pf in _project_file_list:
+                _ct.mark_reviewed(_pf, "quick_scan")
+            _ct.mark_from_findings(findings)
+            coverage_report = _ct.generate_report()
+        except Exception:
+            pass
+
+        # 收集语言统计信息
+        language_stats = None
+        try:
+            from src.tools import TokeiTool
+            tokei = TokeiTool()
+            tokei_result = tokei.run(str(project_path))
+            if tokei_result.success and tokei_result.data:
+                language_stats = tokei_result.data
+        except Exception:
+            pass
 
         report_dir = os.path.join(str(project_path), ".argusmind", "reports")
         result = write_report_to_file(
@@ -459,6 +450,7 @@ def regenerate_html_report(task_id: str):
             quick_scan_findings=quick_scan,
             llm_findings=llm,
             exploit_chain_report=None,
+            language_stats=language_stats,
         )
 
         return OkResponse[dict](data={

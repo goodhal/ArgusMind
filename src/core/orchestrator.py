@@ -183,6 +183,37 @@ class Orchestrator:
         )
         return node_id
 
+    def _mark_stage_completed(self, task_id: str, stage_name: str) -> None:
+        """将指定 AuditStage 节点及其子节点标记为 completed（前端链路图实时更新）。"""
+        try:
+            # 更新父节点
+            db_manager.neo4j_repository.update_node(
+                {"label": "AuditStage", "name": stage_name, "task_id": task_id},
+                {"status": "completed", "end_time": datetime.now().isoformat()},
+            )
+            # 更新子节点（通过 HAS_STAGE 关系）
+            query = """
+            MATCH (parent:AuditStage {name: $stage_name, task_id: $task_id})-[:HAS_STAGE]->(child)
+            SET child.status = 'completed', child.end_time = $end_time
+            RETURN count(child) as updated_count
+            """
+            result = db_manager.neo4j_repository.client.execute_write(
+                query,
+                {
+                    "stage_name": stage_name,
+                    "task_id": task_id,
+                    "end_time": datetime.now().isoformat(),
+                },
+            )
+            if result and result[0]["updated_count"] > 0:
+                self._log(
+                    task_id,
+                    "INFO",
+                    f"标记阶段完成（{stage_name}）: 同时更新 {result[0]['updated_count']} 个子节点",
+                )
+        except Exception as e:
+            self._log(task_id, "WARNING", f"标记阶段完成失败（{stage_name}）: {e}")
+
     def _ensure_stage_node(
         self,
         ctx: ExecutionContext,
@@ -398,12 +429,32 @@ class Orchestrator:
 
 请直接输出分析报告，不要输出其他内容。"""
             try:
-                response = shared_brain.llm.chat_completion(
+                response = shared_brain.llm.call(
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=1000,
                     temperature=0.3,
                 )
-                text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                text = response.content or ""
+                # 上报 token 用量
+                if ctx.task_id and (response.prompt_tokens or response.completion_tokens):
+                    try:
+                        from src.services.token_service import report_token_usage
+                        report_token_usage(
+                            task_id=ctx.task_id,
+                            llm_input=response.prompt_tokens,
+                            llm_output=response.completion_tokens,
+                            note="project_info",
+                        )
+                        # 上报 LLM prompt cache 命中统计
+                        if response.cached_tokens and response.prompt_tokens:
+                            report_token_usage(
+                                task_id=ctx.task_id,
+                                llm_input=response.cached_tokens,
+                                llm_output=response.prompt_tokens - response.cached_tokens,
+                                note="cache_stats:project_info",
+                            )
+                    except Exception:
+                        pass
                 if text and text.strip():
                     return text.strip()
             except Exception as e:
@@ -548,6 +599,7 @@ class Orchestrator:
                 # 信息收集（必须先完成，Plan 和 QuickScan 都依赖 project_info）
                 if not self._collect_or_reuse_project_info(ctx, shared_brain, information_collection_id, project_file_list):
                     return
+                self._mark_stage_completed(ctx.task_id, "信息收集")
 
             # 1.5) 信息收集完成后，Plan 和 QuickScan 并行执行
             # Plan 只依赖 project_info，不依赖 QuickScan 结果
@@ -665,6 +717,7 @@ class Orchestrator:
                         abs_path = r.get("file_path", "")
                         rel_path = os.path.relpath(abs_path, project_root).replace("\\", "/") if abs_path else ""
                         for f in r.get("findings", []):
+                            original_evidence = f.get("evidence", "").strip()
                             pa_findings.append({
                                 "source": "pattern_analyzer",
                                 "vuln_id": "",
@@ -675,10 +728,11 @@ class Orchestrator:
                                 "line": f.get("line", 1),
                                 "vuln_type": f.get("vuln_type", ""),
                                 "cwe": f.get("cwe", ""),
-                                "evidence": f"在 {rel_path}:{f.get('line', 1)} 检测到 {f.get('vuln_type', '')} 相关危险模式",
+                                "evidence": original_evidence or f"在 {rel_path}:{f.get('line', 1)} 检测到 {f.get('vuln_type', '')} 相关危险模式",
                                 "impact_description": f"代码中存在 {f.get('vuln_type', '')} 相关危险模式，需人工确认是否构成实际漏洞",
                                 "remediation": f.get("remediation", ""),
                                 "location": f"{rel_path}:{f.get('line', 1)}",
+                                "code_snippet": original_evidence,
                                 "status": "待验证",
                             })
                     if pa_findings:
@@ -767,28 +821,29 @@ class Orchestrator:
                 self._log(ctx.task_id, "WARNING", f"组件漏洞扫描失败（不阻断主流程）: {e}")
 
             # ── 先执行 QuickScan 流水线（QuickScan + PatternAnalyzer + 组件扫描），再 persist ──
+            _plan_future = None
+            _plan_executor = None
+
             if ctx.offline_mode:
                 self._log(ctx.task_id, "INFO", "脱机模式：跳过审计计划生成，仅执行快速扫描")
                 _run_quick_scan_pipeline()
+                self._mark_stage_completed(ctx.task_id, "Quick Scan")
             elif ctx.extra.get("enable_sink_finder", False):
                 self._log(ctx.task_id, "INFO", "[Checkpoint] 开始并行执行 Plan + QuickScan")
                 try:
-                    with ThreadPoolExecutor(max_workers=2) as parallel_executor:
-                        plan_future = parallel_executor.submit(_run_plan)
-                        scan_future = parallel_executor.submit(_run_quick_scan_pipeline)
-                        plan_success = plan_future.result()
-                        self._log(ctx.task_id, "INFO", f"[Checkpoint] Plan 线程完成, plan_success={plan_success}")
-                        scan_future.result()
-                        self._log(ctx.task_id, "INFO", "[Checkpoint] QuickScan 线程完成")
+                    _plan_executor = ThreadPoolExecutor(max_workers=2)
+                    _plan_future = _plan_executor.submit(_run_plan)
+                    scan_future = _plan_executor.submit(_run_quick_scan_pipeline)
+                    scan_future.result()
+                    self._log(ctx.task_id, "INFO", "[Checkpoint] QuickScan 线程完成")
+                    self._mark_stage_completed(ctx.task_id, "Quick Scan")
                 except Exception as exec_ex:
                     self._log(ctx.task_id, "ERROR", f"[Checkpoint] ThreadPoolExecutor 异常退出: {exec_ex}")
                     raise
-                if not plan_success:
-                    self._log(ctx.task_id, "WARNING", "审计计划缺失，流程结束")
-                    return
             else:
                 self._log(ctx.task_id, "INFO", "Sinker 关闭，跳过审计计划生成，仅执行快速扫描")
                 _run_quick_scan_pipeline()
+                self._mark_stage_completed(ctx.task_id, "Quick Scan")
 
             # 保存过滤前的原始结果，供 LLM 审计参考
             quick_scan_findings_raw = list(quick_scan_findings)
@@ -940,11 +995,26 @@ class Orchestrator:
                 file_review_error = None
                 task_paused = False
 
+                # 等待 Plan 完成（LLM Verification + File Review 不依赖 Plan）
+                plan_success = True
+                if _plan_future is not None:
+                    try:
+                        plan_success = _plan_future.result()
+                        self._log(ctx.task_id, "INFO", f"[Checkpoint] Plan 线程完成, plan_success={plan_success}")
+                    except Exception as plan_ex:
+                        self._log(ctx.task_id, "ERROR", f"Plan 执行异常: {plan_ex}")
+                        plan_success = False
+                    finally:
+                        if _plan_executor:
+                            _plan_executor.shutdown(wait=False)
+                if not plan_success:
+                    self._log(ctx.task_id, "WARNING", "审计计划缺失，跳过 Sink/Chain 分析")
+
                 # 构建 Phase 3 并行任务
                 phase3_futures = []
 
-                # Phase 3A: SinkFinder + ChainAnalyzer（仅启用时执行）
-                if ctx.extra.get("enable_sink_finder", False):
+                # Phase 3A: SinkFinder + ChainAnalyzer（仅启用时执行且 Plan 成功时）
+                if ctx.extra.get("enable_sink_finder", False) and plan_success:
                     self._log(ctx.task_id, "INFO",
                               "[Checkpoint] 进入 SinkFinder + ChainAnalyzer 阶段")
                     sink_finder = SinkFinder(brain=shared_brain)
@@ -1020,6 +1090,7 @@ class Orchestrator:
                         verifier = QuickScanVerifier(
                             llm=shared_brain.llm,
                             project_path=str(ctx.project_path),
+                            task_id=ctx.task_id,
                         )
                         verified = verifier.verify_findings(
                             all_deduped,
@@ -1055,16 +1126,17 @@ class Orchestrator:
                                    + (f"（过滤 {filtered_count} 条误报）" if filtered_count > 0 else ""),
                             status="completed",
                         ))
+                        self._mark_stage_completed(ctx.task_id, "LLM Verification")
                     except Exception as e:
                         verify_error = e
                         self._log(ctx.task_id, "WARNING", f"LLM 验证失败（不阻断主流程）: {e}")
 
-                # 创建 LLM 验证阶段节点
+                # 创建 LLM 验证阶段节点（与 Plan 平级，作为 Task 的直接子节点）
                 _llm_verify_stage_id = self._ensure_stage_node(
                     ctx,
-                    plan_id or task_root_node_id,
+                    task_root_node_id,
                     "LLM Verification",
-                    parent_label="AuditStage" if plan_id else "Task",
+                    parent_label="Task",
                 )
 
                 def _run_file_review():
@@ -1099,27 +1171,36 @@ class Orchestrator:
                             reason=f"Phase3C 文件级审计完成: 发现 {reviewed} 个潜在问题",
                             status="completed",
                         ))
+                        self._mark_stage_completed(ctx.task_id, "File Review")
                     except Exception as e:
                         file_review_error = e
                         self._log(ctx.task_id, "WARNING", f"Phase3C 文件级审计失败（不阻断主流程）: {e}")
 
-                # 创建文件级审计阶段节点（幂等，复用已有同名节点）
+                # 审计完成前去重：优先保留 LLM 审计结果
+                try:
+                    self._deduplicate_findings(ctx.task_id)
+                    self._log(ctx.task_id, "INFO", "审计结果去重完成")
+                except Exception as e:
+                    self._log(ctx.task_id, "WARNING", f"去重失败（不阻断）: {e}")
+
+                # 创建文件级审计阶段节点（与 Plan 平级，作为 Task 的直接子节点）
                 _file_review_stage_id = self._ensure_stage_node(
                     ctx,
-                    plan_id or task_root_node_id,
+                    task_root_node_id,
                     "File Review",
-                    parent_label="AuditStage" if plan_id else "Task",
+                    parent_label="Task",
                 )
 
+                # LLM Verification + File Review 不依赖 Plan，与 Sink/Chain 并行
                 with ThreadPoolExecutor(max_workers=3) as parallel_executor:
-                    if ctx.extra.get("enable_sink_finder", False):
-                        sink_future = parallel_executor.submit(_run_sink_and_chain)
                     verify_future = parallel_executor.submit(_run_llm_verify)
                     file_review_future = parallel_executor.submit(_run_file_review)
                     if ctx.extra.get("enable_sink_finder", False):
-                        sink_future.result()
+                        sink_future = parallel_executor.submit(_run_sink_and_chain)
                     verify_future.result()
                     file_review_future.result()
+                    if ctx.extra.get("enable_sink_finder", False):
+                        sink_future.result()
 
                 # 处理 sink/chain 的错误（LLM 验证错误不阻断）
                 if task_paused:
@@ -1156,7 +1237,10 @@ class Orchestrator:
                 nonlocal coverage_tracker
                 try:
                     ct = CoverageTracker(str(ctx.project_path), project_file_list)
-                    # 标记快速扫描已覆盖的文件
+                    # QuickScan 扫描了所有代码文件，全部标记为已审查
+                    for f in project_file_list:
+                        ct.mark_reviewed(f, "quick_scan")
+                    # 标记有 findings 的文件的具体漏洞类型
                     for f in quick_scan_findings:
                         file_path = f.get("file", "")
                         vuln_type = f.get("vuln_type", "")
@@ -1170,141 +1254,18 @@ class Orchestrator:
                     return None
 
             def _collect_and_dedup_findings():
-                """从 PostgreSQL 收集 findings（与 API 报告数据源一致）+ 去重 + 验证"""
+                """从 PostgreSQL 收集 findings（与 regenerate 端点共用 collect_enriched_findings）"""
                 nonlocal all_findings_for_report
-                findings = []
                 try:
-                    from src.infrastructure.db import session_scope
-                    from src.infrastructure.db.models import Vulnerability
-                    with session_scope() as _s:
-                        rows = _s.query(Vulnerability).filter(
-                            Vulnerability.task_id == ctx.task_id,
-                            Vulnerability.status != "false_positive",
-                        ).all()
-                        for row in rows:
-                            # 从 entry_points 解析 file + line（供后续去重使用）
-                            ep = str(getattr(row.detail, "entry_points", "")) if row.detail else ""
-                            _file = ""
-                            _line = 0
-                            if ep:
-                                parts = ep.split(":", 1)
-                                _file = parts[0]
-                                if len(parts) > 1:
-                                    try:
-                                        _line = int(parts[1])
-                                    except ValueError:
-                                        pass
-
-                            findings.append({
-                                "id": row.id,
-                                "project_id": row.project_id,
-                                "task_id": row.task_id,
-                                "vul_name": row.vul_name,
-                                "title": row.vul_name,
-                                "vuln_type": row.category_name,
-                                "category_name": row.category_name,
-                                "file": _file,
-                                "line": _line,
-                                "location": ep,
-                                "verdict": row.verdict,
-                                "severity": row.level,
-                                "level": row.level,
-                                "confidence": row.confidence,
-                                "source": row.source or "quick_scan",
-                                "neo4j_element_id": row.neo4j_element_id,
-                                "status": row.status,
-                                "verification_status": row.verification_status,
-                            })
+                    from src.services.vulnerability_service import collect_enriched_findings
+                    findings = collect_enriched_findings(ctx.task_id, str(ctx.project_path))
+                    self._log(ctx.task_id, "INFO", f"收集到 {len(findings)} 条 findings")
                 except Exception as e:
                     self._log(ctx.task_id, "WARNING", f"PostgreSQL 查询 findings 失败，降级使用内存数据: {e}")
+                    findings = []
 
                 # PostgreSQL 查询成功则直接使用；降级时仍用快扫内存数据
-                merged = findings if findings else quick_scan_findings
-
-                # 跨源去重（统一按 file_path+vuln_type+line 去重，保留优先级最高的 source）
-                if merged:
-                    try:
-                        from src.services.vulnerability_service import deduplicate_finding_dicts
-                        merged = deduplicate_finding_dicts(merged)
-                        self._log(ctx.task_id, "INFO",
-                                  f"跨源去重: 输入={len(findings)} → 去重后={len(merged)}")
-                    except Exception as e:
-                        self._log(ctx.task_id, "WARNING", f"跨源去重失败（使用原始合并结果）: {e}")
-
-                # ValidationService: 验证漏洞发现，检测幻觉并修正行号
-                if merged:
-                    try:
-                        from src.services.validation_service import ValidationService
-                        validator = ValidationService()
-                        val_result = validator.validate_findings(merged, str(ctx.project_path))
-                        if val_result.hallucinations:
-                            self._log(ctx.task_id, "WARNING",
-                                      f"ValidationService 检测到 {len(val_result.hallucinations)} 个疑似幻觉")
-                        if val_result.corrected:
-                            self._log(ctx.task_id, "INFO",
-                                      f"ValidationService 修正了 {len(val_result.corrected)} 个行号")
-                        merged = val_result.validated
-                    except Exception as e:
-                        self._log(ctx.task_id, "WARNING", f"ValidationService 验证失败（使用原始结果）: {e}")
-
-                # 上下文感知假阳性过滤（Guard Pattern 检测）
-                if merged:
-                    try:
-                        from src.services.validation_service import ValidationService
-                        guard_adjusted = 0
-                        for f in merged:
-                            file_path = f.get("file", "")
-                            line = int(f.get("line", 0) or 0)
-                            vuln_type = f.get("vuln_type", "")
-                            if file_path and line > 0 and vuln_type:
-                                full_path = str(ctx.project_path / file_path)
-                                if os.path.isfile(full_path):
-                                    try:
-                                        with open(full_path, "r", encoding="utf-8", errors="replace") as gf:
-                                            guard_lines = gf.read().split("\n")
-                                        gc = ValidationService.evaluate_guard_context(
-                                            guard_lines, line - 1, vuln_type
-                                        )
-                                        if gc.get("adjusted_confidence") is not None:
-                                            old_conf = float(f.get("confidence", 0.5))
-                                            new_conf = gc["adjusted_confidence"]
-                                            f["confidence"] = min(old_conf, new_conf)
-                                            f["_guard_notes"] = gc.get("notes", [])
-                                            guard_adjusted += 1
-                                    except Exception:
-                                        pass
-                        if guard_adjusted:
-                            self._log(ctx.task_id, "INFO",
-                                      f"Guard Pattern 检测: {guard_adjusted} 条发现置信度已调整")
-                    except Exception as e:
-                        self._log(ctx.task_id, "WARNING", f"Guard Pattern 检测失败: {e}")
-
-                # 漏洞类型标准化 + 低置信度过滤
-                if merged:
-                    try:
-                        from src.knowledge.audit_config import VULN_TYPE_NORMALIZE
-                        normalized_count = 0
-                        for f in merged:
-                            vt = f.get("vuln_type", "")
-                            if vt in VULN_TYPE_NORMALIZE:
-                                f["vuln_type"] = VULN_TYPE_NORMALIZE[vt]
-                                f["category_name"] = VULN_TYPE_NORMALIZE[vt]
-                                normalized_count += 1
-                        if normalized_count:
-                            self._log(ctx.task_id, "INFO",
-                                      f"漏洞类型标准化: {normalized_count} 条已合并碎片化名称")
-                    except Exception as e:
-                        self._log(ctx.task_id, "WARNING", f"类型标准化失败: {e}")
-
-                    # 低置信度过滤（< 0.35 视为误报，不纳入报告）
-                    before_count = len(merged)
-                    merged = [f for f in merged if float(f.get("confidence", 0.5) or 0.5) >= 0.35]
-                    filtered_low = before_count - len(merged)
-                    if filtered_low:
-                        self._log(ctx.task_id, "INFO",
-                                  f"低置信度过滤: {filtered_low} 条 (confidence < 0.35) 已排除")
-
-                return merged
+                return findings if findings else quick_scan_findings
 
             with ThreadPoolExecutor(max_workers=2) as post_executor:
                 ct_future = post_executor.submit(_init_coverage_tracker)
@@ -1344,12 +1305,12 @@ class Orchestrator:
                 except Exception as e:
                     self._log(ctx.task_id, "WARNING", f"AST 增强分析失败（不阻断主流程）: {e}")
 
-            # 创建报告生成阶段节点
+            # 创建报告生成阶段节点（与 Plan 平级，作为 Task 的直接子节点）
             _report_stage_id = self._ensure_stage_node(
                 ctx,
-                plan_id or task_root_node_id,
+                task_root_node_id,
                 "Report Generation",
-                parent_label="AuditStage" if plan_id else "Task",
+                parent_label="Task",
             )
             self._bus.publish(EventStart(
                 task_id=ctx.task_id,
@@ -1391,6 +1352,7 @@ class Orchestrator:
                         status="completed",
                         result=report_md,
                     ))
+                    self._mark_stage_completed(ctx.task_id, "审计评分")
                 except Exception as e:
                     self._log(ctx.task_id, "WARNING", f"生成审计评分报告失败: {e}")
 
@@ -1424,6 +1386,7 @@ class Orchestrator:
                         status="completed",
                         result=coverage_md,
                     ))
+                    self._mark_stage_completed(ctx.task_id, "覆盖率报告")
                 except Exception as e:
                     self._log(ctx.task_id, "WARNING", f"生成覆盖率报告失败: {e}")
 
@@ -1538,14 +1501,34 @@ class Orchestrator:
                                 if gapfill_files:
                                     gf_prompt = _construct_gapfill_prompt(gapfill_files)
                                     try:
-                                        gf_resp = shared_brain.llm.chat_completion(
+                                        gf_resp = shared_brain.llm.call(
                                             messages=[
                                                 {"role": "system", "content": gf_prompt},
                                                 {"role": "user", "content": "审查以上遗漏文件，仅输出JSON格式结果。"},
                                             ],
                                             temperature=0.1,
                                         )
-                                        gf_raw = gf_resp.get("choices", [{}])[0].get("message", {}).get("content", "") if isinstance(gf_resp, dict) else str(gf_resp)
+                                        gf_raw = gf_resp.content or ""
+                                        # 上报 token 用量
+                                        if ctx.task_id and (gf_resp.prompt_tokens or gf_resp.completion_tokens):
+                                            try:
+                                                from src.services.token_service import report_token_usage
+                                                report_token_usage(
+                                                    task_id=ctx.task_id,
+                                                    llm_input=gf_resp.prompt_tokens,
+                                                    llm_output=gf_resp.completion_tokens,
+                                                    note="gapfill",
+                                                )
+                                                # 上报 LLM prompt cache 命中统计
+                                                if gf_resp.cached_tokens and gf_resp.prompt_tokens:
+                                                    report_token_usage(
+                                                        task_id=ctx.task_id,
+                                                        llm_input=gf_resp.cached_tokens,
+                                                        llm_output=gf_resp.prompt_tokens - gf_resp.cached_tokens,
+                                                        note="cache_stats:gapfill",
+                                                    )
+                                            except Exception:
+                                                pass
                                         # 提取 JSON
                                         import json as _json
                                         gf_json_start = gf_raw.find("[")
@@ -1599,12 +1582,24 @@ class Orchestrator:
                                           f"LLM Gapfill 执行失败: {gapfill_ex}")
             except Exception as e:
                 self._log(ctx.task_id, "WARNING", f"防漏报兜底执行失败: {e}")
+            else:
+                self._mark_stage_completed(ctx.task_id, "覆盖盲区分析")
 
             # 7) 生成 HTML 审计报告：依赖所有上述结果
             self._ensure_stage_node(ctx, _report_stage_id, "HTML报告", parent_label="AuditStage")
             try:
                 from src.services.report_generator import write_report_to_file
                 report_dir = os.path.join(str(ctx.project_path), ".argusmind", "reports")
+                # 收集语言统计信息
+                language_stats = None
+                try:
+                    from src.tools import TokeiTool
+                    tokei = TokeiTool()
+                    tokei_result = tokei.run(str(ctx.project_path))
+                    if tokei_result.success and tokei_result.data:
+                        language_stats = tokei_result.data
+                except Exception:
+                    pass
                 report_info = write_report_to_file(
                     report_dir=report_dir,
                     task_id=ctx.task_id,
@@ -1614,8 +1609,9 @@ class Orchestrator:
                     coverage_report=coverage_report,
                     scan_stats=scan_stats,
                     quick_scan_findings=[f for f in all_findings_for_report if f.get("source") in ("quick_scan", "component_scan", "pattern_analyzer")],
-                    llm_findings=[f for f in all_findings_for_report if f.get("source") not in ("quick_scan", "component_scan", "pattern_analyzer", "file_review")],
+                    llm_findings=[f for f in all_findings_for_report if f.get("source") not in ("quick_scan", "component_scan", "pattern_analyzer")],
                     exploit_chain_report=None,
+                    language_stats=language_stats,
                 )
                 self._log(ctx.task_id, "INFO",
                           f"HTML 审计报告已生成: {report_info.get('file_path', '')}")
@@ -1627,6 +1623,7 @@ class Orchestrator:
                     status="completed",
                     result=f"报告已生成: {report_info.get('download_path', '')}",
                 ))
+                self._mark_stage_completed(ctx.task_id, "HTML报告")
             except Exception as e:
                 self._log(ctx.task_id, "WARNING", f"生成 HTML 审计报告失败: {e}")
 
@@ -1948,6 +1945,74 @@ class Orchestrator:
             if check_language_all_categories_completed(lang_node_id):
                 mark_language_status(lang_node_id, "completed")
                 running_set.discard(lang_node_id)
+
+    def _deduplicate_findings(self, task_id: str) -> None:
+        """审计结果去重：优先保留 LLM 审计产生的结果。
+
+        去重规则：
+        1. 按 (file_path, line, category_name) 分组
+        2. 每组按 source 优先级保留最高的，删除其他重复的记录
+        """
+        from src.infrastructure.db.models.vulnerability import Vulnerability, VulnerabilityDetail
+        from src.services.vulnerability_service import _SOURCE_PRIORITY
+        from src.infrastructure.db import session_scope
+        
+        with session_scope() as session:
+            rows = (
+                session.query(Vulnerability)
+                .filter(Vulnerability.task_id == task_id)
+                .all()
+            )
+        
+            if not rows:
+                return
+            
+            # 在 session 内预加载 detail 并提取所有数据（避免外部懒加载）
+            detail_map: dict = {}
+            detail_rows = (
+                session.query(VulnerabilityDetail)
+                .filter(VulnerabilityDetail.vulnerability_id.in_([r.id for r in rows]))
+                .all()
+            )
+            for d in detail_rows:
+                detail_map[d.vulnerability_id] = d
+            
+            # 分组去重，按 source 优先级排序（全部在 session 内完成）
+            groups: dict = {}
+            for v in rows:
+                detail = detail_map.get(v.id)
+                ep = str(detail.entry_points) if detail and detail.entry_points else ''
+                file_path = ep.split(':')[0] if ep else ''
+                try:
+                    line = int(ep.split(':')[1]) if ':' in ep else 0
+                except (ValueError, TypeError):
+                    line = 0
+                category = v.category_name or ''
+                key = (file_path, line, category)
+                
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append((v.id, _SOURCE_PRIORITY.get(v.source or '', 99)))
+            
+            # 每个分组内按优先级升序排序，保留第一个
+            to_delete_ids = []
+            for key, items in groups.items():
+                if len(items) > 1:
+                    items.sort(key=lambda x: x[1])
+                    for vid, _ in items[1:]:
+                        to_delete_ids.append(vid)
+            
+            # 删除重复记录
+            if to_delete_ids:
+                session.query(VulnerabilityDetail).filter(
+                    VulnerabilityDetail.vulnerability_id.in_(to_delete_ids)
+                ).delete(synchronize_session=False)
+                session.query(Vulnerability).filter(
+                    Vulnerability.id.in_(to_delete_ids)
+                ).delete(synchronize_session=False)
+            
+                self._log(task_id, "INFO",
+                         f"去重完成：删除 {len(to_delete_ids)} 个重复结果，保留高优先级审计结果")
 
     def _process_chain_analysis(
         self,

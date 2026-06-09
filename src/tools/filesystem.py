@@ -102,9 +102,9 @@ class ReadFileTool(BaseTool):
         )
 
     def run(self, file_path: Union[str, Path, None] = None, **kwargs) -> ToolResult:
-        # 兼容 LLM 传 path/filepath 而非 file_path 的情况
+        # 兼容 LLM 传 path/filepath/file 而非 file_path 的情况
         if file_path is None:
-            file_path = kwargs.pop("path", None) or kwargs.pop("filepath", None)
+            file_path = kwargs.pop("path", None) or kwargs.pop("filepath", None) or kwargs.pop("file", None)
         if file_path is None:
             return ToolResult(
                 success=False,
@@ -240,9 +240,9 @@ class ReadLinesTool(BaseTool):
         end_line: int = 1,
         **kwargs,
     ) -> ToolResult:
-        # 兼容 LLM 传 path/filepath 而非 file_path 的情况
+        # 兼容 LLM 传 path/filepath/file 而非 file_path 的情况
         if file_path is None:
-            file_path = kwargs.pop("path", None) or kwargs.pop("filepath", None)
+            file_path = kwargs.pop("path", None) or kwargs.pop("filepath", None) or kwargs.pop("file", None)
         if file_path is None:
             return ToolResult(
                 success=False,
