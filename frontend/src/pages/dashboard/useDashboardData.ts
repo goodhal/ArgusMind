@@ -66,7 +66,6 @@ async function fetchTrendSeries(days: number): Promise<{
     if (item?.status === 'fulfilled') {
       return unwrapListData(item.value);
     }
-    console.error('[dashboard] trend request failed', index, item);
     return [];
   };
 
@@ -94,11 +93,9 @@ async function fetchDashboardBase(): Promise<DashboardBaseInput> {
       try {
         return parse(item.value);
       } catch (e) {
-        console.error('[dashboard] parse response failed', index, e);
         return fallback;
       }
     }
-    console.error('[dashboard] request failed', index, item);
     return fallback;
   };
 
@@ -182,7 +179,6 @@ export function useDashboardData() {
         mergeDashboard(base, trends.findingDaily, trends.tokenTrend, days),
       );
     } catch (e) {
-      console.error('[dashboard] fetchDashboardSummary failed', e);
       setError(e instanceof Error ? e : new Error('仪表盘数据加载失败'));
     } finally {
       setLoading(false);
@@ -199,8 +195,8 @@ export function useDashboardData() {
       try {
         const summary = await loadTrend(range, base);
         setData(summary);
-      } catch (e) {
-        console.error('[dashboard] load trend failed', e);
+      } catch {
+        // 趋势加载失败静默处理
       } finally {
         setTrendLoading(false);
       }
