@@ -7,10 +7,11 @@ from __future__ import annotations
 import os
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from sqlalchemy import func, select
 
+from src.api.exceptions import BadRequestError, NotFoundError
 from src.api.security import CurrentUserDep
 from src.infrastructure.db import session_scope
 from src.infrastructure.db.models import EventRecord, LogEntry, Project, Task, Vulnerability
@@ -125,7 +126,7 @@ def get_report(task_id: str) -> OkResponse[dict]:
     with session_scope() as session:
         task = session.get(Task, task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="task not found")
+            raise NotFoundError("任务不存在")
 
         findings_rows = (
             session.execute(
@@ -300,17 +301,17 @@ def get_html_report(task_id: str):
     with session_scope() as session:
         task = session.get(Task, task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="task not found")
+            raise NotFoundError("任务不存在")
 
         project = session.get(Project, task.project_id) if task.project_id else None
         if not project:
-            raise HTTPException(status_code=404, detail="project not found")
+            raise NotFoundError("项目不存在")
 
         report_dir = os.path.join(project.storage_path, ".argusmind", "reports")
         report_file = os.path.join(report_dir, f"audit-report-{task_id}.html")
 
         if not os.path.isfile(report_file):
-            raise HTTPException(status_code=404, detail="HTML report not found")
+            raise NotFoundError("HTML 报告不存在")
 
         return FileResponse(
             report_file,
@@ -327,16 +328,16 @@ def regenerate_html_report(task_id: str):
     with session_scope() as session:
         task = session.get(Task, task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="task not found")
+            raise NotFoundError("任务不存在")
 
         project = session.get(Project, task.project_id) if task.project_id else None
         if not project:
-            raise HTTPException(status_code=404, detail="project not found")
+            raise NotFoundError("项目不存在")
 
         project_name = project.name or "Unknown"
         project_path = project.storage_path or ""
         if not project_path:
-            raise HTTPException(status_code=400, detail="project storage_path is empty")
+            raise BadRequestError("项目存储路径为空")
 
         # 使用共享的 collect_enriched_findings（与 orchestrator 首次报告逻辑一致）
         from src.services.vulnerability_service import collect_enriched_findings

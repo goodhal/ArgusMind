@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
@@ -36,4 +36,4 @@ class TokenLedger(Base):
     code_agent_input: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     code_agent_output: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     note: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

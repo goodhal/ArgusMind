@@ -1,7 +1,7 @@
 """默认事件处理器：把事件持久化到 PostgreSQL 的对应表"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.core.event_bus import get_event_bus
 from src.core.events import (
@@ -102,7 +102,7 @@ def handle_task_status_event(ev: TaskStatusEvent) -> None:
             task.error = ev.message if ev.status == "failed" else task.error
         task.vuln_count = ev.vuln_count
         if ev.status in {"completed", "failed", "cancelled"} and task.finished_at is None:
-            task.finished_at = datetime.utcnow()
+            task.finished_at = datetime.now(timezone.utc)
         if ev.status == "paused" and task.finished_at is not None:
             task.finished_at = None
 

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 class _EventBase:
     """通用事件基类：提供 result 承载字段"""
 
-    occurred_at: datetime = field(default_factory=datetime.utcnow)
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     _result: Any = None
 
     def set_result(self, value: Any) -> None:

@@ -1,7 +1,7 @@
 """任务表"""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -25,8 +25,8 @@ class Task(Base):
     error: Mapped[str] = mapped_column(Text, default="", nullable=False)
     vuln_count: Mapped[int] = mapped_column(default=0, nullable=False)
     stages_to_rerun: Mapped[Optional[List[str]]] = mapped_column(JSONB, default=None, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )

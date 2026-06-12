@@ -9,7 +9,7 @@ import src.storage.manager as db_manager
 from src.api.exceptions import AppException, NotFoundError
 from src.api.security import CurrentUserDep
 from src.schemas.common import OkResponse
-from services import graph_service
+from src.services import graph_service
 
 logger = logging.getLogger(__name__)
 

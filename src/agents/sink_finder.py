@@ -20,8 +20,8 @@ from src.llm import LLMError
 from src.agents.brain import Brain
 from src.agents.prompt.sink_finder import sink_finder_prompt
 from src.agents.prompt.sink_finder_refine import build_sink_refine_system_prompt
-from services.plan_service import mark_risk_category_sink_finder_completed
-from services.sink_flow_service import persist_sink_flow_to_neo4j
+from src.services.plan_service import mark_risk_category_sink_finder_completed
+from src.services.sink_flow_service import persist_sink_flow_to_neo4j
 from src.utils.ids import generate_uuid
 from src.utils.json_parse import parse_json
 from src.knowledge import LANGUAGE_AUDIT_RULES_LLM, build_audit_system_prompt

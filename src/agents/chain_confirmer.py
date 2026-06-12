@@ -31,7 +31,7 @@ from src.agents.prompt.chain_confirmer import (
 from src.core.task_control import TaskPausedError
 from src.llm import LLMError
 from src.services.context_compressor import ContextCompressor
-from services.chain_analysis_service import update_analysis_result_verification, attach_audit_info_record
+from src.services.chain_analysis_service import update_analysis_result_verification, attach_audit_info_record
 
 logger = logging.getLogger(__name__)
 

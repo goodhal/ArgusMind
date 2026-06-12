@@ -81,7 +81,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _uncaught_handler(_: Request, exc: Exception):  # pragma: no cover - 兜底
+        logger.exception("[uncaught] %s", exc)
         return JSONResponse(
             status_code=500,
-            content=_error_body(False, "internal_error", str(exc) or "Internal Server Error"),
+            content=_error_body(False, "internal_error", "Internal Server Error"),
         )

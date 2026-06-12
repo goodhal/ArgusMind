@@ -92,7 +92,7 @@ def update_task(task_id: str, data: TaskUpdate) -> Optional[Task]:
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(task, field, value)
         if data.status in {"completed", "failed", "cancelled"} and task.finished_at is None:
-            task.finished_at = datetime.utcnow()
+            task.finished_at = datetime.now(timezone.utc)
         if data.status in {"cancelled", "completed", "failed", "running"}:
             ctrl = get_task_control()
             ctrl.clear_paused(task_id)

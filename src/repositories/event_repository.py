@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.orm import Session, selectinload
@@ -88,7 +88,7 @@ class EventRepository:
                 EventRecord.status == "running",
                 EventRecord.action_type != ActionType.INFORMATION.value,
             )
-            .values(status="failed", finished_at=datetime.utcnow())
+            .values(status="failed", finished_at=datetime.now(timezone.utc))
         )
         result = self.session.execute(stmt)
         return int(result.rowcount or 0)
@@ -101,7 +101,7 @@ class EventRepository:
                 EventRecord.task_id == task_id,
                 EventRecord.status == "running",
             )
-            .values(status="completed", finished_at=datetime.utcnow())
+            .values(status="completed", finished_at=datetime.now(timezone.utc))
         )
         result = self.session.execute(stmt)
         return int(result.rowcount or 0)

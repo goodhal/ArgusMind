@@ -24,8 +24,8 @@ class HumanInteraction(Base):
     is_confirmed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True, index=True)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     decided_by: Mapped[str] = mapped_column(String(64), default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )

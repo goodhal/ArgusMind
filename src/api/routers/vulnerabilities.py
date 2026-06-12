@@ -116,7 +116,7 @@ def export_findings(
             status=flt.status,
             source=flt.source,
             current=1,
-            page_size=100000,
+            page_size=10000,
         )
         wb = Workbook()
         ws = wb.active

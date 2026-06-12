@@ -43,7 +43,7 @@ def _set_cache(key: str, value: object) -> None:
 
 
 def _since_from_days(days: int) -> datetime:
-    return datetime.utcnow() - timedelta(days=max(1, days))
+    return datetime.now(timezone.utc) - timedelta(days=max(1, days))
 
 
 def _empty_severity_row(date: str) -> DailySeverityStat:

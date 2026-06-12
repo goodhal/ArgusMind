@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 
 import src.storage.manager as db_manager
 from src.api.exceptions import AppException
@@ -36,7 +36,7 @@ def list_chains(finding_id: str = Query(..., description="漏洞 ID")) -> OkResp
     with session_scope() as session:
         finding = session.get(Vulnerability, finding_id)
         if finding is None:
-            raise HTTPException(status_code=404, detail="finding not found")
+            raise NotFoundError("漏洞不存在")
         element_id = finding.neo4j_element_id
 
     if not element_id:

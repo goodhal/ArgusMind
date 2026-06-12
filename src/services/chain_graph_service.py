@@ -9,7 +9,7 @@ import json
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import src.storage.manager as db_manager
-from services import chain_analysis_service as cas
+from src.services import chain_analysis_service as cas
 
 # 与 chain_analysis_service 中可变长 FLOW 上界一致
 _MAX_FLOW_DEPTH = getattr(cas, "_VUL_FLOW_MAX_DEPTH", 150)

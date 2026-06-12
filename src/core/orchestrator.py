@@ -51,12 +51,12 @@ from src.core.retry import with_retry, RetryConfig
 from src.core.policies import OrchestratorPolicy
 from src.services.smart_file_filter import SmartFileFilter
 from src.services.project_service import get_project
-from services.chain_analysis_service import (
+from src.services.chain_analysis_service import (
     ensure_knowledge_element_id_for_risk_category,
     fetch_non_completed_analysis_results_for_vul,
     reset_non_completed_analysis_results_to_pending_for_vul,
 )
-from services.plan_service import (
+from src.services.plan_service import (
     fetch_all_pending_risk_categories,
     fetch_all_pending_risk_categories_global,
     fetch_next_pending_language_for_plan,
@@ -69,7 +69,7 @@ from services.plan_service import (
     check_language_all_categories_completed,
 )
 from src.services.event_service import fail_running_non_information_events_for_task, complete_running_events_for_task
-from services.sink_flow_service import (
+from src.services.sink_flow_service import (
     SINK_FLOW_LEAF_STATUS_RUNNING,
     fetch_next_pending_sink_chain_path,
     mark_sink_flow_leaf_status,

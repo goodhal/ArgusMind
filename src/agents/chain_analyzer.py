@@ -41,7 +41,7 @@ from src.agents.prompt.chain_analyzer import (
     chain_analyzer_system_prompt,
     chain_analyzer_force_conclude_prompt, chain_node_prompt,
 )
-from services.chain_analysis_service import (
+from src.services.chain_analysis_service import (
     attach_audit_info_record,
     create_chain_node,
     find_chain_node_by_file_function_and_category,

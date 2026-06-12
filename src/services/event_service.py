@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.infrastructure.db import session_scope
@@ -45,7 +45,7 @@ def create_event(
             tool_name=tool_name,
             status=status,
             reason=reason,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         session.add(event)
         session.flush()
@@ -83,7 +83,7 @@ def finish_event(
             return None
         event.status = status
         event.final_status = final_status or ""
-        event.finished_at = datetime.utcnow()
+        event.finished_at = datetime.now(timezone.utc)
         event.llm_input_delta = int(llm_input_delta or 0)
         event.llm_output_delta = int(llm_output_delta or 0)
         event.code_agent_input_delta = int(code_agent_input_delta or 0)

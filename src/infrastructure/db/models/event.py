@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
@@ -34,7 +34,7 @@ class EventRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default="running", nullable=False, index=True)
     reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     final_status: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # 本次调用对应的 token 增量（冗余字段，便于前端直接展示）

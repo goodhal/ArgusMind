@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from src.infrastructure.db import session_scope
@@ -70,8 +70,8 @@ def request_approval(
                     if row.is_confirmed is None:
                         row.is_confirmed = bool(auto_approve_on_timeout)
                         row.decided_by = "timeout"
-                        row.confirmed_at = datetime.utcnow()
-                        row.updated_at = datetime.utcnow()
+                        row.confirmed_at = datetime.now(timezone.utc)
+                        row.updated_at = datetime.now(timezone.utc)
                         approved = bool(auto_approve_on_timeout)
                         decided_by = "timeout"
                     else:
@@ -114,8 +114,8 @@ def resolve_approval(
         row.message = message
         row.is_confirmed = bool(approved)
         row.decided_by = operator or "user"
-        row.confirmed_at = datetime.utcnow()
-        row.updated_at = datetime.utcnow()
+        row.confirmed_at = datetime.now(timezone.utc)
+        row.updated_at = datetime.now(timezone.utc)
         return {
             "interaction_id": interaction_id,
             "approved": bool(row.is_confirmed),

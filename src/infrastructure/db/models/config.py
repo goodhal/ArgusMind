@@ -19,5 +19,5 @@ class ConfigEntry(Base):
     value_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )
